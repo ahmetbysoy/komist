@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testcase name="on + emit + off" time="0.001233" classname="test"/>
+	<testcase name="birden fazla dinleyici sırayla çalışır" time="0.000658" classname="test"/>
+	<testcase name="dinleyici hatası diğerlerini etkilemez" time="0.002066" classname="test"/>
+	<testcase name="veri taşınır" time="0.000219" classname="test"/>
+	<testcase name="once — tek seferlik" time="0.000173" classname="test"/>
+	<testcase name="clamp" time="0.001192" classname="test"/>
+	<testcase name="median — tek sayı" time="0.000207" classname="test"/>
+	<testcase name="median — çift sayı" time="0.000129" classname="test"/>
+	<testcase name="median — boş dizi" time="0.000110" classname="test"/>
+	<testcase name="mean" time="0.000921" classname="test"/>
+	<testcase name="rollingSlope — artan seri pozitif eğim" time="0.000251" classname="test"/>
+	<testcase name="rollingSlope — azalan seri negatif eğim" time="0.000140" classname="test"/>
+	<testcase name="rollingSlope — yetersiz veri" time="0.000145" classname="test"/>
+	<testcase name="wall tespiti: belirgin büyük emir" time="0.001871" classname="test"/>
+	<testcase name="DetectorSuite: tüm dedektörler hata vermeden çalışır" time="0.000720" classname="test"/>
+	<testcase name="compression: wall yokken aktifleşmez" time="0.000227" classname="test"/>
+	<testcase name="volume modunda bucket hedefe ulaşınca candle oluşur" time="0.001565" classname="test"/>
+	<testcase name="time modunda süre dolunca candle kapanır" time="0.000211" classname="test"/>
+	<testcase name="karışık akışta pressure yönü doğru" time="0.000179" classname="test"/>
+	<testcase name="sinyal ekleme + dedup (10s, %0.05)" time="0.001803" classname="test"/>
+	<testcase name="farklı fiyattaki sinyal dedup etmez" time="0.000213" classname="test"/>
+	<testcase name="stale veri confidence kırpar (%15)" time="0.000180" classname="test"/>
+	<testcase name="decay: eski sinyal düşer" time="0.000274" classname="test"/>
+	<testcase name="expiry: süresi geçen sinyal temizlenir" time="0.000177" classname="test"/>
+	<testcase name="SMA doğru hesaplanır" time="0.000146" classname="test"/>
+	<testcase name="EMA son değer aralıkta" time="0.000172" classname="test"/>
+	<testcase name="RSI: yalnız artış → 100" time="0.000370" classname="test"/>
+	<testcase name="RSI: yalnız düşüş → 0" time="0.000211" classname="test"/>
+	<testcase name="ATR pozitif" time="0.000390" classname="test"/>
+	<testcase name="CVD: buy +, sell -" time="0.001391" classname="test"/>
+	<testcase name="side sınıflandırma: fiyat ≥ mid → buy" time="0.000269" classname="test"/>
+	<testcase name="VPIN: tek yönlü akış yüksek VPIN üretir" time="0.000539" classname="test"/>
+	<testcase name="likidasyon ekleme" time="0.000288" classname="test"/>
+	<testcase name="Strategy propose: cooldown içinde ikinci öneri engellenir" time="0.001583" classname="test"/>
+	<testcase name="Strategy shadow modda confluence'a gitmez" time="0.000228" classname="test"/>
+	<testcase name="WallBounceStrategy: fiyat wall yakınında öneri üretir" time="0.000325" classname="test"/>
+	<testcase name="CUSUM: 4 ardışık kayıp → kötü drift" time="0.000187" classname="test"/>
+	<testcase name="CUSUM: ardışık kazanç kötü drift üretmez" time="0.000169" classname="test"/>
+	<testcase name="BayesianWeighting: prior ağırlık (α=3, β=2, obs=5)" time="0.000323" classname="test"/>
+	<testcase name="BayesianWeighting: TP sonrası ağırlık artar" time="0.000257" classname="test"/>
+	<!-- tests 40 -->
+	<!-- suites 0 -->
+	<!-- pass 40 -->
+	<!-- fail 0 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 0 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 429.784311 -->
+</testsuites>

@@ -46,17 +46,28 @@ npm test             # birim testler (Node test runner)
 
 ## 📱 APK Üretimi
 
-### Otomatik (önerilen) — GitHub Actions
-`.github/workflows/build-apk.yml` her `main` push'unda APK derler:
+### Otomatik (önerilen) — GitHub Actions "🚀 BOZOK PRO • Android APK Fabrikası"
+`.github/workflows/build-apk.yml` her `main`/`develop` push'unda otomatik APK derler:
 
 1. Repoyu GitHub'a it (`git push origin main`)
-2. **Actions** sekmesi → "Build Android APK" workflow'u çalışır
-3. Biten işin **Artifacts** kısmından `bozok-terminal-apk` indir
+2. **Actions** sekmesi → "🚀 BOZOK PRO • Android APK Fabrikası" workflow'u çalışır:
+   - 🕵️ **Keşif** → sürüm künyesi + debug/release matrix planı
+   - 🧹 **Kalite** → JS sözdizimi taraması
+   - 🧪 **Test** → 40 birim test + JUnit raporu (artifact)
+   - 📦 **Derleme** → Vite build → Capacitor sync → Debug & Release APK (paralel)
+   - 📊 **Rapor** → APK boyutları GitHub Summary'de
+3. Biten işin **Artifacts** kısmından `🚀-BOZOK-PRO-Debug-*` / `🚀-BOZOK-PRO-Release-*` indir
 4. `v1.0.0` gibi bir tag atarsan APK otomatik **Release** sayfasına eklenir
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
 ```
+
+**Manuel tetikleme:** Actions → workflow → "Run workflow" → build tipi (debug/release/both), test aç/kapa, temiz build seçenekleri.
+
+**Release imzası (isteğe bağlı):** Release APK'yı imzalamak için repo **Secrets**'ına ekle:
+`KEYSTORE_BASE64` (base64 keystore), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
+Secrets yoksa Debug APK imzalı ve kurulabilir durumdadır; Release APK imzasız üretilir (CI'da `apksigner` doğrulaması bilgi amaçlıdır).
 
 ### Yerel (Android Studio / SDK varsa)
 ```bash

@@ -1,76 +1,516 @@
-name: Build Android APK
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║                                                                              ║
+# ║   ██████╗  ██████╗ ███████╗ ██████╗ ██╗  ██╗    ██████╗ ██████╗  ██████╗     ║
+# ║   ██╔══██╗██╔═══██╗╚══███╔╝██╔═══██╗██║ ██╔╝    ██╔══██╗██╔══██╗██╔═══██╗    ║
+# ║   ██████╔╝██║   ██║  ███╔╝ ██║   ██║█████╔╝     ██████╔╝██████╔╝██║   ██║    ║
+# ║   ██╔══██╗██║   ██║ ███╔╝  ██║   ██║██╔═██╗     ██╔═══╝ ██╔══██╗██║   ██║    ║
+# ║   ██████╔╝╚██████╔╝███████╗╚██████╔╝██║  ██╗    ██║     ██║  ██║╚██████╔╝    ║
+# ║   ╚═════╝  ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝    ╚═╝     ╚═╝  ╚═╝ ╚═════╝     ║
+# ║                                                                              ║
+# ║          🏭  O T O M A T İ K   A P K   F A B R İ K A S I   v2.1  🏭          ║
+# ║                    (Vite + Capacitor 6 uyumlu sürüm)                          ║
+# ╠══════════════════════════════════════════════════════════════════════════════╣
+# ║  🕵️  Keşif       → Sürüm, matrix ve motivasyon sözü belirlenir               ║
+# ║  🧹  Kalite      → JS sözdizimi taraması + isteğe bağlı Android lint         ║
+# ║  🧪  Test        → Node birim testleri (JUnit raporu) artifact olarak saklanır║
+# ║  📦  Derleme     → Vite build → Capacitor sync → Debug & Release paralel      ║
+# ║  🔐  İmza        → Keystore varsa Release otomatik imzalanır                  ║
+# ║  📊  Rapor       → APK boyutları GitHub Summary'de tablo hâlinde              ║
+# ║  🏷️  Yayın       → v* tag'i atınca GitHub Release kendiliğinden doğar        ║
+# ║  ☕  Kahve       → Tek manuel adım. Onu sen halledeceksin. 😎                ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
 
-# Tetikleyiciler:
-#  - main'e her push
-#  - v* etiketli tag'ler (Release'e APK eklenir)
-#  - manuel çalıştırma (workflow_dispatch)
+name: '🚀 BOZOK PRO • Android APK Fabrikası'
+
 on:
   push:
-    branches: [main]
-    tags: ['v*']
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # 🌙 Her Pazartesi 03:00 UTC → "acaba hâlâ derleniyor mu?" kontrolü
+    - cron: '0 3 * * 1'
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: '📦 Hangi lezzeti pişirelim?'
+        type: choice
+        default: both
+        options:
+          - both
+          - debug
+          - release
+      run_tests:
+        description: '🧪 Testler koşsun mu? (cesaret testi)'
+        type: boolean
+        default: true
+      clean_build:
+        description: '🧼 Cache olmadan sıfırdan mı? (yavaş ama temiz)'
+        type: boolean
+        default: false
+
+# 🚦 Aynı branch'te yeni push gelirse eskisini nazikçe uğurla
+concurrency:
+  group: bozok-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write   # Release oluşturmak için
+  contents: write      # 🏷️ Release oluşturmak için
+  checks: write        # ✅ Test raporlarını iliştirmek için
+  pull-requests: write # 💬 PR'a yorum bırakmak için
+
+env:
+  GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dkotlin.incremental=false'
+  JAVA_VERSION: '17'
+  NODE_VERSION: '20'
+  TERM: dumb
 
 jobs:
-  build-apk:
-    name: Derle & APK Üret
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 🕵️ 1) KEŞİF UÇUŞU — Fabrika ısınıyor
+  # ══════════════════════════════════════════════════════════════════════════════
+  recon:
+    name: '🕵️ Keşif & Hazırlık'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix:    ${{ steps.plan.outputs.matrix }}
+      version:   ${{ steps.meta.outputs.version }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      stamp:     ${{ steps.meta.outputs.stamp }}
+      quote:     ${{ steps.motivation.outputs.quote }}
     steps:
-      - name: Checkout
+      - name: 📥 Repoyu ışınla
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🏷️ Sürüm & künye çıkarılıyor
+        id: meta
+        run: |
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          STAMP="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="dev-${SHORT_SHA}"
+          fi
+          {
+            echo "version=${VERSION}"
+            echo "short_sha=${SHORT_SHA}"
+            echo "stamp=${STAMP}"
+          } >> "$GITHUB_OUTPUT"
+          echo "🔖 Sürüm : ${VERSION}"
+          echo "🧬 Commit: ${SHORT_SHA}"
+          echo "🕰️ Zaman : ${STAMP}"
+
+      - name: 🗺️ Üretim bandı planlanıyor
+        id: plan
+        run: |
+          DEBUG='{"variant":"debug","task":"assembleDebug","emoji":"🐛","label":"Debug"}'
+          RELEASE='{"variant":"release","task":"assembleRelease","emoji":"💎","label":"Release"}'
+          case "${{ inputs.build_type }}" in
+            debug)   MATRIX="[${DEBUG}]" ;;
+            release) MATRIX="[${RELEASE}]" ;;
+            *)       MATRIX="[${DEBUG},${RELEASE}]" ;;
+          esac
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "🏭 Bant planı: ${MATRIX}"
+
+      - name: 🔮 Günün geliştirici falı
+        id: motivation
+        run: |
+          QUOTES=(
+            "☕ Kod derlenirken kahve içmek bilimsel olarak zorunludur."
+            "🐛 Her bug, doğmamış bir feature'dır."
+            "🧘 Gradle bekliyor... sen de nefes al."
+            "🚀 'Bende çalışıyordu' cümlesi CI ile tarihe karıştı."
+            "🎩 Kodu değil, kendini de refactor et bugün."
+            "🍕 Build yeşilse pizza hak edilmiştir."
+          )
+          PICK="${QUOTES[$RANDOM % ${#QUOTES[@]}]}"
+          echo "quote=${PICK}" >> "$GITHUB_OUTPUT"
+
+      - name: 📜 Fabrika açılış töreni
+        run: |
+          {
+            echo "# 🏭 BOZOK PRO • Üretim Bandı Açıldı"
+            echo ""
+            echo "| 🧾 Künye | Değer |"
+            echo "|---|---|"
+            echo "| 🔖 Sürüm | ${{ steps.meta.outputs.version }} |"
+            echo "| 🧬 Commit | ${{ steps.meta.outputs.short_sha }} |"
+            echo "| 🌿 Ref | ${{ github.ref_name }} |"
+            echo "| 🎬 Tetikleyen | ${{ github.event_name }} |"
+            echo "| 👤 Kaptan | @${{ github.actor }} |"
+            echo "| 🕰️ Zaman | ${{ steps.meta.outputs.stamp }} |"
+            echo ""
+            echo "> ${{ steps.motivation.outputs.quote }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 🧹 2) KALİTE KONTROL — JS sözdizimi taraması (+ isteğe bağlı Android lint)
+  # ══════════════════════════════════════════════════════════════════════════════
+  quality:
+    name: '🧹 Kalite Kontrol'
+    runs-on: ubuntu-latest
+    needs: recon
+    timeout-minutes: 20
+    steps:
+      - name: 📥 Repoyu klonla
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: ☕ Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - name: Setup JDK 17
+      - name: 📦 Bağımlılıkları yükle
+        run: npm ci
+
+      - name: 🔎 JS sözdizimi taraması (kaynak dokümandaki bugların önlenmesi)
+        run: |
+          FAIL=0
+          REPORT="build/lint-report.txt"
+          mkdir -p build
+          : > "$REPORT"
+          while IFS= read -r f; do
+            if ! node --check "$f" > /dev/null 2>&1; then
+              echo "✗ SÖZTAKSI HATASI: $f" | tee -a "$REPORT"
+              FAIL=1
+            fi
+          done < <(find src tests -name '*.js' -type f)
+          if [ "$FAIL" -eq 0 ]; then
+            echo "✅ Tüm JS dosyaları sözdizimi temiz (syntax OK)" | tee -a "$REPORT"
+          fi
+          exit $FAIL
+
+      - name: 📤 Lint raporunu sakla
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 🧹-lint-raporu
+          path: build/lint-report.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 🧪 3) TEST LABORATUVARI — Node birim testleri (JUnit raporu)
+  # ══════════════════════════════════════════════════════════════════════════════
+  test:
+    name: '🧪 Test Laboratuvarı'
+    runs-on: ubuntu-latest
+    needs: recon
+    timeout-minutes: 15
+    # Push/PR/schedule'da her zaman; manuel tetikte yalnızca run_tests true ise
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
+    steps:
+      - name: 📥 Repoyu klonla
+        uses: actions/checkout@v4
+
+      - name: ☕ Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 📦 Bağımlılıkları yükle
+        run: npm ci
+
+      - name: 🧪 Birim testleri sahnede (JUnit raporlu)
+        run: |
+          mkdir -p build/test-results
+          node --test --test-reporter=junit --test-reporter-destination=build/test-results/junit.xml tests/
+
+      - name: 📊 Test sonuçları özetleniyor
+        if: always()
+        run: |
+          TOTAL=0; FAIL=0; SKIP=0
+          while IFS= read -r f; do
+            # Node junit: <testcase .../> satırları + <failure> çocuk elementleri
+            T=$(grep -c '<testcase ' "$f" 2>/dev/null || true)
+            F=$(grep -c '<failure ' "$f" 2>/dev/null || true)
+            TOTAL=$((TOTAL + ${T:-0}))
+            FAIL=$((FAIL + ${F:-0}))
+          done < <(find . -path '*test-results*' -name '*.xml' 2>/dev/null)
+          PASS=$((TOTAL - FAIL - SKIP))
+          {
+            echo "## 🧪 Test Laboratuvarı Raporu"
+            echo ""
+            echo "| 🎯 Toplam | ✅ Geçen | ❌ Düşen | ⏭️ Atlanan |"
+            echo "|---|---|---|---|"
+            echo "| ${TOTAL} | ${PASS} | ${FAIL} | ${SKIP} |"
+            echo ""
+            if [ "${FAIL}" -eq 0 ]; then
+              echo "🎉 **Tertemiz!** Tüm testler alnının akıyla geçti."
+            else
+              echo "🚨 **${FAIL} test isyan etti.** Raporlar artifact'te bekliyor."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📤 Test raporlarını sakla
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 🧪-test-raporlari
+          path: build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 📦 4) ÜRETİM BANDI — Vite build → Capacitor sync → APK'ler fırından çıkıyor
+  # ══════════════════════════════════════════════════════════════════════════════
+  build:
+    name: '${{ matrix.emoji }} ${{ matrix.label }} APK'
+    runs-on: ubuntu-latest
+    needs: [ recon, test ]
+    if: ${{ always() && needs.recon.result == 'success' && needs.test.result != 'failure' }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.recon.outputs.matrix) }}
+    steps:
+      - name: 📥 Repoyu klonla
+        uses: actions/checkout@v4
+
+      - name: ☕ Java ${{ env.JAVA_VERSION }} tam devir
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Android SDK kurulumu
+      - name: ☕ Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 🤖 Android SDK montaj hattı
         uses: android-actions/setup-android@v3
 
-      - name: Bağımlılıkları yükle
-        run: npm ci
+      - name: ⚡ Gradle turbo cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ inputs.clean_build == true || github.ref != 'refs/heads/main' }}
 
-      - name: Web uygulamasını derle (Vite)
-        run: npm run build
+      - name: 📦 Web uygulamasını derle (Vite)
+        run: |
+          npm ci
+          npm run build
 
-      - name: Capacitor Android projesini ekle
-        run: npx cap add android
+      - name: 🧩 Capacitor Android projesini hazırla
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
 
-      - name: Capacitor sync
-        run: npx cap sync android
-
-      - name: APK derle (debug)
+      - name: 🔑 Wrapper'a yetki ver
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: chmod +x ./gradlew
 
-      - name: APK'yı kontrol et
-        run: ls -la android/app/build/outputs/apk/debug/
+      - name: 🔐 Keystore kasadan çıkarılıyor
+        if: ${{ matrix.variant == 'release' && env.KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "${RUNNER_TEMP}/bozok.jks"
+          {
+            echo "BOZOK_STORE_FILE=${RUNNER_TEMP}/bozok.jks"
+            echo "BOZOK_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}"
+            echo "BOZOK_KEY_ALIAS=${{ secrets.KEY_ALIAS }}"
+            echo "BOZOK_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}"
+          } >> "$GITHUB_ENV"
+          # Gradle release signingConfig enjeksiyonu (Groovy build.gradle'a eklenir)
+          {
+            echo ""
+            echo "android {"
+            echo "    signingConfigs {"
+            echo "        release {"
+            echo "            storeFile file(System.getenv('BOZOK_STORE_FILE') ?: '')"
+            echo "            storePassword System.getenv('BOZOK_STORE_PASSWORD')"
+            echo "            keyAlias System.getenv('BOZOK_KEY_ALIAS')"
+            echo "            keyPassword System.getenv('BOZOK_KEY_PASSWORD')"
+            echo "        }"
+            echo "    }"
+            echo "    buildTypes {"
+            echo "        release {"
+            echo "            signingConfig signingConfigs.release"
+            echo "        }"
+            echo "    }"
+            echo "}"
+          } >> android/app/build.gradle
+          echo "🔐 Keystore hazır, imza töreni başlayabilir."
 
-      - name: APK'yı artifact olarak yükle
+      - name: '${{ matrix.emoji }} ${{ matrix.label }} APK fırınlanıyor...'
+        working-directory: android
+        run: |
+          echo "🔥 Fırın 200°C... task: ${{ matrix.task }}"
+          ./gradlew ${{ matrix.task }} --stacktrace
+
+      - name: 🔎 APK röntgeni & boyut ölçümü
+        id: xray
+        working-directory: android
+        run: |
+          OUT_DIR="app/build/outputs/apk/${{ matrix.variant }}"
+          echo "🎉 Bantta çıkan ürünler:"
+          find "$OUT_DIR" -name '*.apk' -type f -exec ls -lh {} \; || true
+          {
+            echo "## ${{ matrix.emoji }} ${{ matrix.label }} APK Raporu"
+            echo ""
+            echo "| 📱 Dosya | 📏 Boyut |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          TOTAL=0
+          while IFS= read -r apk; do
+            SIZE=$(stat -c%s "$apk")
+            TOTAL=$((TOTAL + SIZE))
+            echo "| $(basename "$apk") | $(numfmt --to=iec --suffix=B "$SIZE") |" >> "$GITHUB_STEP_SUMMARY"
+          done < <(find "$OUT_DIR" -name '*.apk' -type f)
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "📦 **Toplam:** $(numfmt --to=iec --suffix=B "$TOTAL")" >> "$GITHUB_STEP_SUMMARY"
+          echo "total_size=$(numfmt --to=iec --suffix=B "$TOTAL")" >> "$GITHUB_OUTPUT"
+
+      - name: 🛡️ İmza doğrulama (nazik mod)
+        if: ${{ matrix.variant == 'release' }}
+        continue-on-error: true
+        working-directory: android
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+          if [ -n "$APKSIGNER" ]; then
+            find app/build/outputs/apk/release -name '*.apk' -exec \
+              "$APKSIGNER" verify --print-certs {} \;
+          else
+            echo "🤷 apksigner bulunamadı, bu adımı es geçiyoruz."
+          fi
+
+      - name: 📤 ${{ matrix.label }} APK'yi kasaya kaldır
         uses: actions/upload-artifact@v4
         with:
-          name: bozok-terminal-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: 🚀-BOZOK-PRO-${{ matrix.label }}-${{ needs.recon.outputs.version }}
+          path: android/app/build/outputs/apk/${{ matrix.variant }}/*.apk
           if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
 
-      - name: Sürüm APK'sını kopyala
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          mkdir -p release
-          cp android/app/build/outputs/apk/debug/app-debug.apk release/bozok-terminal-${{ github.ref_name }}.apk
+      - name: 🗺️ Mapping dosyasını da al (R8 hatıraları)
+        if: ${{ matrix.variant == 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: 🗺️-mapping-${{ needs.recon.outputs.version }}
+          path: android/app/build/outputs/mapping/release/**
+          if-no-files-found: ignore
+          retention-days: 30
 
-      - name: GitHub Release'e APK ekle
-        if: startsWith(github.ref, 'refs/tags/')
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 🏷️ 5) YAYIN TÖRENİ — Sadece v* tag'lerinde konfeti patlar
+  # ══════════════════════════════════════════════════════════════════════════════
+  release:
+    name: '🏷️ GitHub Release Töreni'
+    runs-on: ubuntu-latest
+    needs: [ recon, build ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 10
+    steps:
+      - name: 📥 Tüm artifact'leri topla
+        uses: actions/download-artifact@v4
+        with:
+          path: 🎁-teslimat
+          merge-multiple: true
+
+      - name: 🎊 Release yayına alınıyor
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.apk
+          name: '🚀 BOZOK PRO ${{ needs.recon.outputs.version }}'
+          tag_name: ${{ github.ref_name }}
           generate_release_notes: true
+          files: 🎁-teslimat/**/*.apk
+          body: |
+            ## 🚀 BOZOK PRO ${{ needs.recon.outputs.version }}
+
+            📦 APK'ler aşağıda, taze taze fırından çıktı.
+
+            | 🧾 Bilgi | Değer |
+            |---|---|
+            | 🔖 Sürüm | ${{ needs.recon.outputs.version }} |
+            | 🧬 Commit | ${{ needs.recon.outputs.short_sha }} |
+            | 🕰️ Derleme | ${{ needs.recon.outputs.stamp }} |
+
+            ☕ İyi kullanımlar, bug bulursan issue açmayı unutma!
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 📢 6) KAPANIŞ KONUŞMASI — Ne olduysa raporu yaz
+  # ══════════════════════════════════════════════════════════════════════════════
+  report:
+    name: '📢 Kapanış & Konfeti'
+    runs-on: ubuntu-latest
+    needs: [ recon, quality, test, build ]
+    if: always()
+    timeout-minutes: 5
+    steps:
+      - name: 🎯 Skorbord
+        run: |
+          Q="${{ needs.quality.result }}"
+          T="${{ needs.test.result }}"
+          B="${{ needs.build.result }}"
+          icon() {
+            case "$1" in
+              success)   echo "✅ Başarılı" ;;
+              failure)   echo "❌ Çöktü" ;;
+              cancelled) echo "🚫 İptal" ;;
+              skipped)   echo "⏭️ Atlandı" ;;
+              *)         echo "❓ Bilinmiyor" ;;
+            esac
+          }
+          {
+            echo "## 📢 Fabrika Kapanış Raporu"
+            echo ""
+            echo "| 🏭 İstasyon | 🚦 Durum |"
+            echo "|---|---|"
+            echo "| 🧹 Kalite Kontrol | $(icon "$Q") |"
+            echo "| 🧪 Test Laboratuvarı | $(icon "$T") |"
+            echo "| 📦 Üretim Bandı | $(icon "$B") |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$B" = "success" ]; then
+            {
+              echo "### 🎉🎊 KONFETİ ZAMANI 🎊🎉"
+              echo ""
+              echo "> 🎉 ✨ 🎊 ✨ 🎉 ✨ 🎊 ✨ 🎉"
+              echo "> BOZOK PRO derlendi ve paketlendi!"
+              echo "> 📦 APK'ler → Artifacts sekmesinde"
+              echo "> 🎉 ✨ 🎊 ✨ 🎉 ✨ 🎊 ✨ 🎉"
+              echo ""
+              echo "> ${{ needs.recon.outputs.quote }}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### 🧯 Ufak bir yangın var"
+              echo ""
+              echo "Log'lara bir göz at, panik yok — her build bir öğretmendir. 🧑‍🏫"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 💬 PR'a durum yorumu bırak
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const ok = '${{ needs.build.result }}' === 'success';
+            const body = ok
+              ? `### 🚀 BOZOK PRO • Build Raporu\n\n🎉 **Her şey yolunda!** APK'ler hazır.\n\n| 🏭 İstasyon | 🚦 |\n|---|---|\n| 🧹 Lint | ${{ needs.quality.result }} |\n| 🧪 Test | ${{ needs.test.result }} |\n| 📦 Build | ${{ needs.build.result }} |\n\n📥 APK'ler **Artifacts** sekmesinde seni bekliyor. ☕`
+              : `### 🧯 BOZOK PRO • Build Raporu\n\n❌ Build takıldı. Log'lar seni çağırıyor 🔍\n\n| 🏭 İstasyon | 🚦 |\n|---|---|\n| 🧹 Lint | ${{ needs.quality.result }} |\n| 🧪 Test | ${{ needs.test.result }} |\n| 📦 Build | ${{ needs.build.result }} |`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });

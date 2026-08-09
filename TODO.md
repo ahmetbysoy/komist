@@ -90,9 +90,9 @@
 - [x] Node smoke test (modül import, engine birim testleri) — 40/40 geçti
 - [x] Vite dev server çalıştırma doğrulaması (live preview) — 5173 canlı
 - [x] Build testi (`npm run build`) — 78 modül, 29.87 kB gzip
-- [ ] TODO kapatma + son kontrol
+- [x] TODO kapatma + son kontrol — tüm fazlar tamam (sadece CI doğrulaması push sonrası)
 
 ## FAZ 13 — GitHub Yükleme
-- [ ] git add/commit (anlamlı commit mesajları)
-- [ ] GitHub repo oluşturma & push talimatı (token kullanıcıda)
-- [ ] CI'da APK üretiminin doğrulanması (kullanıcı tarafında)
+- [x] git add/commit (anlamlı commit mesajları) — `dfa252a`
+- [x] GitHub repo oluşturma & push talimatı (token kullanıcıda) — `git-push.sh` hazır
+- [ ] CI'da APK üretiminin doğrulanması (kullanıcı tarafında — push sonrası otomatik)
