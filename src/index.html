@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="professional">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0e17" />
+  <title>BOZOK TERMINAL</title>
+  <link rel="stylesheet" href="./styles/app.css" />
+</head>
+<body>
+  <!-- Üst şerit -->
+  <div id="super-top-ticker">
+    <span class="ticker-symbol" id="tickerSymbol">BTCUSDT</span>
+    <span class="ticker-price" id="priceDisplay">0.00</span>
+    <span class="ticker-change" id="change24h">+0.00%</span>
+    <span class="status" id="connStatus">BAĞLANIYOR</span>
+  </div>
+
+  <div id="app-root">
+    <!-- Header -->
+    <header id="header">
+      <span class="title">⚡ BOZOK</span>
+      <input id="symbolInput" placeholder="BTCUSDT" value="BTCUSDT" autocomplete="off" spellcheck="false" />
+      <button class="btn btn-primary" id="symbolBtn">Git</button>
+    </header>
+
+    <!-- Paneller -->
+    <div id="panels">
+
+      <!-- BOOK -->
+      <section class="panel active" id="tab-book">
+        <div class="panel-title">📊 Order Book Derinliği</div>
+        <div class="canvas-box"><canvas id="book-canvas"></canvas></div>
+        <div class="metrics">
+          <div class="metric"><div class="label">Mid</div><div class="value c-blue" id="midVal">-</div></div>
+          <div class="metric"><div class="label">Spread</div><div class="value c-yel" id="spreadVal">-</div></div>
+          <div class="metric"><div class="label">OBI</div><div class="value" id="obiVal">-</div></div>
+          <div class="metric"><div class="label">Microprice</div><div class="value c-pur" id="microVal">-</div></div>
+        </div>
+        <div class="panel-title" style="margin-top:10px">Katmanlar</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="liquidity" checked /> likidite</label>
+          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="trades" checked /> trades</label>
+          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="walls" /> walls</label>
+          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="spoofing" /> spoof</label>
+          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="iceberg" /> iceberg</label>
+          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="vpvr" /> vpvr</label>
+        </div>
+      </section>
+
+      <!-- FLOW -->
+      <section class="panel" id="tab-flow">
+        <div class="panel-title">🔥 Order Flow Candle</div>
+        <div class="canvas-box"><canvas id="flow-canvas"></canvas></div>
+        <div class="metrics">
+          <div class="metric"><div class="label">Delta (son)</div><div class="value" id="flowDeltaVal">-</div></div>
+          <div class="metric"><div class="label">VPIN</div><div class="value c-yel" id="vpinVal">-</div></div>
+          <div class="metric"><div class="label">CVD</div><div class="value" id="cvdVal">-</div></div>
+          <div class="metric"><div class="label">Rejim</div><div class="value c-pur" id="regimeVal">-</div></div>
+        </div>
+      </section>
+
+      <!-- DEPTH -->
+      <section class="panel" id="tab-depth">
+        <div class="panel-title">🧠 Derinlik Analizi</div>
+        <div class="canvas-box" style="min-height:140px"><canvas id="cvd-canvas"></canvas></div>
+        <div class="canvas-box" style="min-height:140px;margin-top:8px"><canvas id="equity-canvas"></canvas></div>
+        <div class="panel-title" style="margin-top:10px">Derinlik Tablosu</div>
+        <div id="ladderBox" class="ladder-box"></div>
+      </section>
+
+      <!-- SIGNALS -->
+      <section class="panel" id="tab-signals">
+        <div class="panel-title">🚨 Sinyaller</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button class="btn signal-filter" data-filter="all">Tümü</button>
+          <button class="btn signal-filter" data-filter="bullish">▲ Alım</button>
+          <button class="btn signal-filter" data-filter="bearish">▼ Satım</button>
+          <button class="btn signal-filter" data-filter="warning">⚠ Uyarı</button>
+        </div>
+        <div id="signalList"></div>
+      </section>
+
+      <!-- LEVELS -->
+      <section class="panel" id="tab-levels">
+        <div class="panel-title">🎯 Trade Planı & Optimizer</div>
+        <div class="plan-card">
+          <div class="plan-dir" id="planDir" style="color:var(--text-dim)">YÖN YOK</div>
+          <div class="plan-grid">
+            <div class="item"><div class="label">Entry</div><div class="val" id="planEntry">-</div></div>
+            <div class="item"><div class="label">Stop</div><div class="val c-red" id="planStop">-</div></div>
+            <div class="item"><div class="label">TP1</div><div class="val c-green" id="planTp1">-</div></div>
+            <div class="item"><div class="label">TP2</div><div class="val c-green" id="planTp2">-</div></div>
+            <div class="item"><div class="label">RR</div><div class="val c-yel" id="planRR">-</div></div>
+            <div class="item"><div class="label">Confidence</div><div class="val c-blue" id="planConf">-</div></div>
+          </div>
+          <div style="margin-top:8px;font-size:11px;color:var(--text-dim)" id="planReason"></div>
+        </div>
+        <div class="panel-title" style="margin-top:12px">Micro Account Optimizer (Kelly)</div>
+        <div class="metrics">
+          <div class="metric"><div class="label">Miktar</div><div class="value" id="microQty">-</div></div>
+          <div class="metric"><div class="label">Kaldıraç</div><div class="value c-yel" id="microLev">-</div></div>
+          <div class="metric"><div class="label">Notional</div><div class="value" id="microNotional">-</div></div>
+          <div class="metric"><div class="label">Liq Fiyat</div><div class="value c-red" id="microLiq">-</div></div>
+          <div class="metric"><div class="label">Max Risk</div><div class="value" id="microRisk">-</div></div>
+        </div>
+        <div class="panel-title" style="margin-top:12px">Narrative (Meta)</div>
+        <div class="plan-card"><div id="narrativeText" style="font-size:11px;color:var(--text-dim)">Veri bekleniyor...</div></div>
+      </section>
+
+      <!-- MARKETS -->
+      <section class="panel" id="tab-markets">
+        <div class="panel-title">🌍 Çoklu Borsa</div>
+        <table class="ex-table">
+          <thead><tr><th>Borsa</th><th>Mid</th><th>Spread</th></tr></thead>
+          <tbody>
+            <tr id="ex-binance"><td>Binance</td><td>-</td><td>-</td></tr>
+            <tr id="ex-bybit"><td>Bybit</td><td>-</td><td>-</td></tr>
+            <tr id="ex-okx"><td>OKX</td><td>-</td><td>-</td></tr>
+            <tr id="ex-mexc"><td>MEXC</td><td>-</td><td>-</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- PERF -->
+      <section class="panel" id="tab-perf">
+        <div class="panel-title">📈 Performans (Paper)</div>
+        <div class="canvas-box" style="min-height:160px"><canvas id="equity-canvas"></canvas></div>
+        <div class="metrics">
+          <div class="metric"><div class="label">İşlem</div><div class="value" id="perfTrades">0</div></div>
+          <div class="metric"><div class="label">Win Rate</div><div class="value c-green" id="perfWR">-</div></div>
+          <div class="metric"><div class="label">Net R</div><div class="value c-yel" id="perfNetR">-</div></div>
+          <div class="metric"><div class="label">PF</div><div class="value" id="perfPF">-</div></div>
+          <div class="metric"><div class="label">Sharpe</div><div class="value" id="perfSharpe">-</div></div>
+          <div class="metric"><div class="label">Max DD</div><div class="value c-red" id="perfDD">-</div></div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="panel" id="tab-settings">
+        <div class="panel-title">⚙️ Ayarlar</div>
+        <div class="panel-title" style="font-size:11px">Tema</div>
+        <div class="theme-row">
+          <button class="theme-btn active" data-theme-option="professional">Pro</button>
+          <button class="theme-btn" data-theme-option="neon">Neon</button>
+          <button class="theme-btn" data-theme-option="minimal">Minimal</button>
+          <button class="theme-btn" data-theme-option="war">Savaş</button>
+        </div>
+        <div class="panel-title" style="font-size:11px;margin-top:10px">Flow</div>
+        <div class="setting-row">
+          <label>Flow Modu</label>
+          <select data-setting="flowMode" data-type="select">
+            <option value="time">Time</option>
+            <option value="volume">Volume</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Flow Timeframe (ms)</label>
+          <input type="number" data-setting="flowTimeframeMs" />
+        </div>
+        <div class="panel-title" style="font-size:11px;margin-top:10px">Risk</div>
+        <div class="setting-row">
+          <label>Risk %</label>
+          <input type="number" data-setting="riskPct" step="0.5" />
+        </div>
+        <div class="setting-row">
+          <label>Max Kaldıraç</label>
+          <input type="number" data-setting="maxLeverage" />
+        </div>
+        <div class="setting-row">
+          <label>Min RR</label>
+          <input type="number" data-setting="minRR" step="0.5" />
+        </div>
+        <div class="setting-row">
+          <label>Wall Çarpanı</label>
+          <input type="number" data-setting="wallMultiplier" step="0.5" />
+        </div>
+        <div class="panel-title" style="font-size:11px;margin-top:10px">Ses & Bildirim</div>
+        <div class="setting-row">
+          <label>Ses Efektleri</label>
+          <input type="checkbox" data-setting="soundOn" />
+        </div>
+        <div class="setting-row">
+          <label>Sesli Anons</label>
+          <input type="checkbox" data-setting="voiceAnnounce" />
+        </div>
+      </section>
+    </div>
+
+    <!-- Alt navigasyon -->
+    <nav id="bottom-nav">
+      <button class="navItem active" data-tab="book"><span class="icon">📊</span>BOOK</button>
+      <button class="navItem" data-tab="flow"><span class="icon">🔥</span>FLOW</button>
+      <button class="navItem" data-tab="depth"><span class="icon">🧠</span>DEPTH</button>
+      <button class="navItem" data-tab="signals"><span class="icon">🚨</span>SINYAL<span id="signalBadge"></span></button>
+      <button class="navItem" data-tab="levels"><span class="icon">🎯</span>LEVELS</button>
+      <button class="navItem" data-tab="markets"><span class="icon">🌍</span>MKT</button>
+      <button class="navItem" data-tab="perf"><span class="icon">📈</span>PERF</button>
+      <button class="navItem" data-tab="settings"><span class="icon">⚙️</span>SET</button>
+    </nav>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

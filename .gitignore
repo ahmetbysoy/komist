@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+
+# Capacitor native (CI'da `cap add android` ile üretilir)
+android/
+ios/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# Env / secrets
+.env
+.env.local
+*.keystore
+*.jks
+local.properties
+
+# Test coverage
+coverage/

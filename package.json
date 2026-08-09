@@ -1,0 +1,25 @@
+{
+  "name": "bozok-terminal-mobile",
+  "version": "1.0.0",
+  "description": "BOZOK TERMINAL MOBILE — Microstructure + Confluence trading terminal (Capacitor Android APK)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test tests/",
+    "cap:add:android": "cap add android",
+    "cap:sync": "cap sync android",
+    "apk:local": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "apk:path": "echo 'APK: android/app/build/outputs/apk/debug/app-debug.apk'"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/cli": "^6.1.2",
+    "vite": "^5.4.0"
+  }
+}
