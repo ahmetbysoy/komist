@@ -138,7 +138,9 @@ export class ConfluenceEngine {
       status,
       note: '',
       mfeR: 0, beDone: false, trailingStage: 0, entrySlDistance: 0, entryTpDistance: 0,
-      recommendedSize: this.bot.getRecommendedPositionSize?.(finalScore) || null
+      recommendedSize: this.bot.getRecommendedPositionSize?.(finalScore) || null,
+      evaluationPoints: { t5: null, t15: null, t60: null },
+      paternSignature: contributors.map(c=>c.strategy).sort().join('+')
     };
 
     this.bot.calculateDynamicTpSl?.(signal);

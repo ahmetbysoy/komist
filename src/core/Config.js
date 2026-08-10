@@ -35,6 +35,12 @@ export const DEFAULT_SETTINGS = {
   // ── Breakeven & Trailing ─────────────────────────────
   breakeven: { beAtR: 0.8, trailAfterR: 1.5, trailToR: 0.5 },
 
+  // ── Sinyal eşikleri (yapay zeka hafızası için) ─────────
+  signalThresholds: {
+    volumeSpikeThreshold: 5,
+    profitTargetPercent: 0.2
+  },
+
   // ── Oto-optimizasyon ─────────────────────────────────
   optimization: {
     enabled: true,

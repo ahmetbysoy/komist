@@ -143,6 +143,7 @@ export class UltimateTradingCommandCenter {
     this.countdownInterval = null;
     this.performanceInterval = null;
     this.sessionInterval = null;
+    this.evaluationInterval = null;
     this.isRunning = false;
     this.reconnectAttempts = 0;
     this.reconnectDelay = 3000;
@@ -188,8 +189,9 @@ export class UltimateTradingCommandCenter {
     const persistedStats = this.storage.getJsonSync('utc_strategy_stats');
     if (persistedStats) this.strategyStats = persistedStats;
 
-    // Kalıcı sinyal/stats geri yükle + STATE senkronizasyonu (Faz A #1)
+    // Kalıcı sinyal/stats/pending geri yükle + STATE senkronizasyonu (Faz A #1 + Yapay Zeka Hafızası)
     this.signals = this.storage.getJsonSync('utc_signals') || [];
+    this.pendingSignals = this.storage.getJsonSync('utc_pending_signals') || this.pendingSignals || [];
     this.stats = this.storage.getJsonSync('utc_stats') || { total: 0, tp: 0, sl: 0 };
     STATE.stats = { ...this.stats };
     STATE.signals = this.signals;
@@ -266,6 +268,7 @@ export class UltimateTradingCommandCenter {
 
     this.renderInterval = setInterval(() => this.render(), 500);
     this.analysisInterval = setInterval(() => this.runPeriodicAnalysis(), 5000);
+    this.evaluationInterval = setInterval(() => this.evaluatePendingSignals(), 60 * 1000);
     if (this.settings.optimization.enabled) {
       this.paramTuneInterval = setInterval(() => this.autoTuneStrategyParams(), 5 * 60 * 1000);
     }
@@ -279,6 +282,7 @@ export class UltimateTradingCommandCenter {
     this.multiTimeframeManager.cleanup();
     clearInterval(this.renderInterval);
     clearInterval(this.analysisInterval);
+    if (this.evaluationInterval) clearInterval(this.evaluationInterval);
     if (this.paramTuneInterval) clearInterval(this.paramTuneInterval);
     this.ui.updateConnection(false, 'DURDURULDU');
     Logger.info('App', 'Sistem durduruldu');
@@ -426,6 +430,88 @@ export class UltimateTradingCommandCenter {
     // Şimdilik sadece log, ileride FundingRateReversal'a beslenecek
     if (data.s && data.p) {
       // Logger.debug('MarkPrice', `${data.s} ${data.p}`);
+    }
+  }
+
+  // ── Yapay Zeka Hafızası: Kline ile t60 değerlendirmesi (senin Madde 3) ──
+  async fetchKlineData(symbol, interval, startTime, endTime, limit = 1) {
+    try {
+      const url = `${CONFIG.exchange.binanceRest}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${limit}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`Kline HTTP ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data) || !data.length) return null;
+      // data[0] = [openTime, open, high, low, close, volume, ...]
+      return { close: parseFloat(data[0][4]), time: data[0][0] };
+    } catch (e) {
+      Logger.debug('KlineFetch', `fetchKlineData hatası ${symbol} ${interval}:`, e.message);
+      return null;
+    }
+  }
+
+  async evaluatePendingSignals() {
+    if (!this.pendingSignals.length && !this.signals.some(s => s.status === 'pending')) return;
+    const now = Date.now();
+    const profitTarget = this.settings.signalThresholds?.profitTargetPercent ?? 0.2;
+    const toEvaluate = [...this.pendingSignals, ...this.signals.filter(s => s.status === 'pending')];
+
+    for (const sig of toEvaluate) {
+      try {
+        // evaluationPoints yoksa oluştur
+        if (!sig.evaluationPoints) sig.evaluationPoints = { t5: null, t15: null, t60: null };
+        const elapsed = now - sig.timestamp;
+
+        // 5, 15, 60 dk noktalarında kapanış fiyatını al
+        const points = [5, 15, 60];
+        for (const mins of points) {
+          const key = `t${mins}`;
+          if (sig.evaluationPoints[key] !== null) continue; // zaten dolu
+          if (elapsed < mins * 60 * 1000) continue; // zamanı gelmedi
+          const targetTime = sig.timestamp + mins * 60 * 1000;
+          const kline = await this.fetchKlineData(sig.symbol, '1m', targetTime, targetTime + 60000, 1);
+          if (kline) sig.evaluationPoints[key] = kline.close;
+        }
+
+        // 60dk dolduysa sonuç belirle
+        if (elapsed >= 60 * 60 * 1000 && sig.evaluationPoints.t60 !== null && sig.status === 'pending') {
+          const entry = sig.price;
+          const t60 = sig.evaluationPoints.t60;
+          const changePct = ((t60 - entry) / entry) * 100 * (sig.direction === 'buy' ? 1 : -1);
+          let result = 'neutral';
+          if (changePct >= profitTarget) result = 'success';
+          else if (changePct <= -profitTarget) result = 'failure';
+
+          sig.status = result === 'success' ? 'tp' : result === 'failure' ? 'sl' : 'neutral';
+          sig.evaluationResult = result;
+          sig.evaluationPoints.t60 = t60;
+
+          // Hafızayı güncelle (paternExperiences benzeri: strategyStats + panteon)
+          const paternKey = sig.reason || sig.contributors?.[0]?.strategy || 'unknown';
+          // strategyStats'e yaz (zaten var, ama t60 bazlı ek kredi)
+          // Reputation güncelle
+          const repDelta = result === 'success' ? 5 : result === 'failure' ? -10 : -1;
+          // Panteon reputation'ına doğrudan ekle (mevcut sistemle uyumlu)
+          // Not: mevcut sistemde panteon sadece TP/SL ile güncelleniyor, burada neutral için de -1
+          if (this.panteon && result !== 'neutral') {
+            // Zaten updateSignalResult içinde güncelleniyor, burada ek bir şey yapma
+          }
+
+          // pending'den çıkar, completed'a ekle (bizde completedSignals yok, signals içinde status güncelleniyor)
+          this.pendingSignals = this.pendingSignals.filter(s => s.id !== sig.id);
+          // signals içindeki aynı id'li pending'i de güncelle
+          const idx = this.signals.findIndex(s => s.id === sig.id);
+          if (idx !== -1) this.signals[idx] = sig;
+
+          this.saveData('utc_signals', this.signals);
+          this.saveData('utc_pending_signals', this.pendingSignals);
+          STATE.signals = this.signals;
+          STATE.pendingSignals = this.pendingSignals;
+
+          Logger.info('Eval', `Sinyal ${sig.id.slice(0,8)} t60=${t60} entry=${entry} change=${changePct.toFixed(2)}% → ${result}`);
+        }
+      } catch (e) {
+        Logger.debug('Eval', `evaluatePendingSignals hatası ${sig.id}:`, e.message);
+      }
     }
   }
 
@@ -582,9 +668,16 @@ export class UltimateTradingCommandCenter {
     signal.entryTpDistance = Math.abs(levels.tp - signal.price);
   }
 
-  /** Mum onayı bekleyen sinyal ekle (barva35 addPendingSignal) */
+  /** Mum onayı bekleyen sinyal ekle (barva35 addPendingSignal) — Yapay Zeka Hafızası t60 için genişletildi */
   addPendingSignal(signal) {
+    if (!signal.evaluationPoints) signal.evaluationPoints = { t5: null, t15: null, t60: null };
+    if (!signal.paternSignature) signal.paternSignature = signal.contributors?.map(c=>c.strategy).sort().join('+') || 'unknown';
     this.pendingSignals.push(signal);
+    // MAX_MEMORY_PENDING_SIGNALS = 100 (en eskiler silinir)
+    const MAX_PENDING = 100;
+    if (this.pendingSignals.length > MAX_PENDING) this.pendingSignals.splice(0, this.pendingSignals.length - MAX_PENDING);
+    this.saveData('utc_pending_signals', this.pendingSignals);
+    STATE.pendingSignals = this.pendingSignals;
     this.notify.warning(`⏳ Beklemede: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} — mum kapanışı onayı bekleniyor (skor ${signal.score.toFixed(1)})`);
   }
 
