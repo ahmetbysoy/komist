@@ -567,6 +567,72 @@ export class UIController {
   }
 
   // ── Faz C: MTF Özet ──────────────────────────────────
+  _drawSparkline(svgId, values, color) {
+    const svg = $(svgId);
+    if (!svg || !values.length) return;
+    const w = 80, h = 24;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const points = values.map((v,i) => {
+      const x = (i / (values.length-1)) * w;
+      const y = h - ((v - min) / range) * h;
+      return `${x},${y}`;
+    }).join(' ');
+    svg.innerHTML = `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />`;
+  }
+
+  updateMetrics(ratio, volumeSpike, topBids, topAsks) {
+    const ratioEl = $('metric-ratio-value');
+    const volEl = $('metric-volume-value');
+    const bidsEl = $('top-bids-list');
+    const asksEl = $('top-asks-list');
+    if (ratioEl) {
+      ratioEl.textContent = ratio !== null ? (ratio*100).toFixed(1) + '%' : '—';
+      ratioEl.style.color = ratio > 0.55 ? 'var(--positive)' : ratio < 0.45 ? 'var(--negative)' : 'var(--neutral)';
+    }
+    if (volEl) {
+      volEl.textContent = volumeSpike ? volumeSpike.toFixed(1) + 'x' : '—';
+      volEl.style.color = volumeSpike > 5 ? 'var(--positive)' : volumeSpike > 2 ? 'var(--neutral)' : 'var(--text-secondary)';
+    }
+    // Sparkline için history tut
+    if (!this._ratioHistory) this._ratioHistory = [];
+    if (!this._volHistory) this._volHistory = [];
+    if (ratio !== null) {
+      this._ratioHistory.push(ratio);
+      if (this._ratioHistory.length > 20) this._ratioHistory.shift();
+      this._drawSparkline('metric-ratio-sparkline', this._ratioHistory, ratio > 0.55 ? '#3ddc97' : ratio < 0.45 ? '#ff4d4f' : '#ffa500');
+    }
+    if (volumeSpike !== null) {
+      this._volHistory.push(volumeSpike);
+      if (this._volHistory.length > 20) this._volHistory.shift();
+      this._drawSparkline('metric-volume-sparkline', this._volHistory, volumeSpike > 5 ? '#3ddc97' : '#ffa500');
+    }
+    // Top bids/asks with percentage bars
+    if (bidsEl && topBids) {
+      const totalBidVol = topBids.reduce((s,[,q])=>s+q,0) || 1;
+      bidsEl.innerHTML = topBids.map(([p,q]) => {
+        const pct = (q/totalBidVol*100).toFixed(0);
+        return `<li style="display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px solid var(--border-color);">
+          <span>${p.toFixed(2)} <span style="color:var(--text-secondary);">${q.toFixed(4)}</span></span>
+          <span style="background:var(--positive); height:4px; width:${pct}%; display:inline-block; border-radius:2px; vertical-align:middle; margin-left:6px;"></span>
+          <span style="font-size:9px; color:var(--text-secondary);">${pct}%</span>
+        </li>`;
+      }).join('');
+    }
+    if (asksEl && topAsks) {
+      const totalAskVol = topAsks.reduce((s,[,q])=>s+q,0) || 1;
+      asksEl.innerHTML = topAsks.map(([p,q]) => {
+        const pct = (q/totalAskVol*100).toFixed(0);
+        return `<li style="display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px solid var(--border-color);">
+          <span>${p.toFixed(2)} <span style="color:var(--text-secondary);">${q.toFixed(4)}</span></span>
+          <span style="background:var(--negative); height:4px; width:${pct}%; display:inline-block; border-radius:2px; vertical-align:middle; margin-left:6px;"></span>
+          <span style="font-size:9px; color:var(--text-secondary);">${pct}%</span>
+        </li>`;
+      }).join('');
+    }
+  }
+
   updateMtfDisplay() {
     const el = $('kp-mtf');
     if (!el || !this.bot.multiTimeframeManager) return;

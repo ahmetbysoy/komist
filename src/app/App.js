@@ -1113,12 +1113,16 @@ export class UltimateTradingCommandCenter {
         this.ui.renderPaternExperiences();
       }
     } catch(_){}
+    // BÖLÜM 3: Metrik kartları + sparkline + top-bids/asks güncelle
+    try { this.updateMetricsDisplay(); } catch(_){}
   }
 
   render() {
     this.ui.updateTicker();
     this.ui.updatePriceDisplay();
     this.ui.updateSignalBars(this.confluenceEngine.buyScore || 0, this.confluenceEngine.sellScore || 0);
+    // BÖLÜM 3: Metrik kartları her render'da güncelle (500ms)
+    try { this.updateMetricsDisplay(); } catch(_){}
     // Faz C: MTF özetini kehanet paneline ekle
     let mtfText = '—';
     try {
@@ -1184,6 +1188,45 @@ export class UltimateTradingCommandCenter {
     const tfMs = { '1m': 60000, '5m': 300000, '15m': 900000, '1h': 3600000, '4h': 14400000 }[this.currentTimeframe] || 900000;
     const remain = Math.max(0, Math.floor((last.time + tfMs - Date.now()) / 1000));
     this.ui.updateCandleCountdown(remain);
+  }
+
+  updateMetricsDisplay() {
+    // Alıcı/Satıcı Oranı: son 5s trade'lerden (OrderFlowMomentum mantığı)
+    let ratio = null;
+    try {
+      const trades = this.cvd?.history?.slice(-50) || [];
+      if (trades.length > 10) {
+        let buy = 0, sell = 0;
+        for (const t of trades.slice(-20)) {
+          if (t.delta > 0) buy += t.delta;
+          else sell += Math.abs(t.delta);
+        }
+        const total = buy + sell;
+        if (total > 0) ratio = buy / total;
+      }
+    } catch(_){}
+    // Hacim Patlaması: isVolumeSpike ile
+    let volSpike = null;
+    try {
+      const lastVol = this.candles[this.candles.length-1]?.volume;
+      if (lastVol) {
+        const vols = this.candles.map(c=>c.volume);
+        const avg = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+        const avg5 = avg(vols.slice(-5));
+        if (avg5 > 0) volSpike = lastVol / avg5;
+      }
+    } catch(_){}
+    // Top 3 bids/asks (hacme göre sıralı)
+    let topBids = null, topAsks = null;
+    try {
+      if (this.orderBook?.bids?.length) {
+        topBids = [...this.orderBook.bids].sort((a,b)=>b[1]-a[1]).slice(0,3);
+      }
+      if (this.orderBook?.asks?.length) {
+        topAsks = [...this.orderBook.asks].sort((a,b)=>b[1]-a[1]).slice(0,3);
+      }
+    } catch(_){}
+    try { this.ui.updateMetrics(ratio, volSpike, topBids, topAsks); } catch(_){}
   }
 
   startPerformanceMonitor() {

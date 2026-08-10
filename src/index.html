@@ -97,6 +97,34 @@
           <div class="price-item"><div class="price-label">VOLATİLİTE (ATR)</div><div class="price-value" id="atr-value">-</div></div>
           <div class="price-item countdown"><span id="candle-countdown">--:--</span></div>
         </div>
+        <!-- Metrik Kartları + Sparkline (BÖLÜM 3) -->
+        <div class="metrics-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px;">
+          <div class="metric-card" style="background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:8px;">
+            <div style="font-size:9px; color:var(--text-secondary);">Alıcı/Satıcı Oranı</div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span id="metric-ratio-value" style="font-size:14px; font-weight:700;">—</span>
+              <svg id="metric-ratio-sparkline" width="80" height="24" style="flex:1;"></svg>
+            </div>
+          </div>
+          <div class="metric-card" style="background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:8px;">
+            <div style="font-size:9px; color:var(--text-secondary);">Hacim Patlaması</div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span id="metric-volume-value" style="font-size:14px; font-weight:700;">—</span>
+              <svg id="metric-volume-sparkline" width="80" height="24" style="flex:1;"></svg>
+            </div>
+          </div>
+        </div>
+        <!-- Öne Çıkan Duvarlar (top-bids/asks) -->
+        <div class="wall-list" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px;">
+          <div>
+            <div style="font-size:9px; color:var(--text-secondary); margin-bottom:4px;">En Büyük 3 Destek (Bids)</div>
+            <ul id="top-bids-list" style="list-style:none; padding:0; margin:0; font-size:10px;"></ul>
+          </div>
+          <div>
+            <div style="font-size:9px; color:var(--text-secondary); margin-bottom:4px;">En Büyük 3 Direnç (Asks)</div>
+            <ul id="top-asks-list" style="list-style:none; padding:0; margin:0; font-size:10px;"></ul>
+          </div>
+        </div>
       </div>
     </header>
 
