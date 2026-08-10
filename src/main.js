@@ -5,6 +5,24 @@
 import { UltimateTradingCommandCenter } from './app/App.js';
 import { Logger } from './core/Logger.js';
 
+// SW & Cache temizliği — eski sürümler çakışmasın (ai_studio_code.html referansı, BÖLÜM 3)
+(async () => {
+  if ('serviceWorker' in navigator) {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+      if (regs.length) console.log(`🧹 ${regs.length} eski ServiceWorker silindi`);
+    } catch(e) {}
+  }
+  if ('caches' in window) {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+      if (keys.length) console.log(`🧹 ${keys.length} eski Cache silindi:`, keys);
+    } catch(e) {}
+  }
+})();
+
 console.log('%c🏛️ KOMUTA MERKEZİ JS YÜKLENDİ — Boot başlıyor...', 'color:#58a6ff; font-weight:700;');
 
 async function boot() {
