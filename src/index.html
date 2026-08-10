@@ -296,6 +296,26 @@
             <button id="refresh-strategy-perf-btn" class="btn btn-tiny">⟳ Yenile</button>
           </div>
         </div>
+        <!-- Paper Trading (grafik.html hafif) -->
+        <div class="settings-group" style="grid-column: 1 / -1;">
+          <div class="panel-title">📝 Paper Trading (Sanal)</div>
+          <div id="paper-stats" style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; text-align:center; margin-bottom:8px;">
+            <div><div style="font-size:9px; color:var(--text-secondary);">Equity</div><div id="paper-equity" style="font-weight:700;">10000</div></div>
+            <div><div style="font-size:9px; color:var(--text-secondary);">WinRate</div><div id="paper-winrate" style="font-weight:700;">0%</div></div>
+            <div><div style="font-size:9px; color:var(--text-secondary);">Toplam</div><div id="paper-total" style="font-weight:700;">0</div></div>
+            <div><div style="font-size:9px; color:var(--text-secondary);">PnL</div><div id="paper-pnl" style="font-weight:700;">0</div></div>
+          </div>
+          <div class="data-table-container" style="max-height:200px; overflow-y:auto;">
+            <table class="data-table">
+              <thead><tr><th>Sembol</th><th>Yön</th><th>Giriş</th><th>Kapanış</th><th>Durum</th><th>PnL</th><th>R</th></tr></thead>
+              <tbody id="paper-history-body"><tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Henüz paper işlem yok</td></tr></tbody>
+            </table>
+          </div>
+          <div style="margin-top:6px; display:flex; gap:6px; justify-content:flex-end;">
+            <button id="paper-export-csv-btn" class="btn btn-tiny">CSV</button>
+            <button id="paper-clear-btn" class="btn btn-tiny btn-danger">Sıfırla</button>
+          </div>
+        </div>
         <!-- Yapay Zeka Hafızası: Strateji Karnesi (paternExperiences) -->
         <div class="settings-group" style="grid-column: 1 / -1;">
           <div class="panel-title">📚 Strateji Karnesi (Patern Deneyimleri)</div>

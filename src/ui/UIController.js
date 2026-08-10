@@ -199,6 +199,16 @@ export class UIController {
       }
     });
 
+    // Paper Trading
+    $('paper-export-csv-btn')?.addEventListener('click', () => this.exportPaperTradingCSV());
+    $('paper-clear-btn')?.addEventListener('click', () => {
+      if (confirm('Paper trading sıfırlansın mı? Equity 10000 olacak.')) {
+        this.bot.paperTrading?.clear();
+        this.updatePaperTrading();
+        this.bot.notify?.warning('Paper trading sıfırlandı');
+      }
+    });
+
     // Faz C: Strateji performans export
     $('export-strategy-csv-btn')?.addEventListener('click', () => this.exportStrategyCSV());
     $('refresh-strategy-perf-btn')?.addEventListener('click', () => this.renderStrategyPerformance());
@@ -447,6 +457,54 @@ export class UIController {
       if (last) deltaEl.textContent = `Son: ${last.delta>0?'+'+last.delta:last.delta} (${last.result})`;
       else deltaEl.textContent = '';
     }
+  }
+
+  updatePaperTrading() {
+    const statsEl = $('paper-equity');
+    const winEl = $('paper-winrate');
+    const totalEl = $('paper-total');
+    const pnlEl = $('paper-pnl');
+    const tbody = $('paper-history-body');
+    const stats = this.bot.paperTrading?.getStats?.() || { equity: 10000, winRate: '0.0', total: 0, totalPnl: 0 };
+    if (statsEl) statsEl.textContent = Math.round(stats.equity).toLocaleString();
+    if (winEl) {
+      winEl.textContent = stats.winRate + '%';
+      winEl.style.color = parseFloat(stats.winRate) >= 50 ? 'var(--positive)' : 'var(--negative)';
+    }
+    if (totalEl) totalEl.textContent = stats.total;
+    if (pnlEl) {
+      pnlEl.textContent = (stats.totalPnl >= 0 ? '+' : '') + stats.totalPnl.toFixed(2);
+      pnlEl.style.color = stats.totalPnl >= 0 ? 'var(--positive)' : 'var(--negative)';
+    }
+    if (tbody) {
+      const hist = this.bot.paperTrading?.history || [];
+      if (!hist.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Henüz paper işlem yok</td></tr>';
+      } else {
+        tbody.innerHTML = hist.slice(-20).reverse().map(p => `
+          <tr>
+            <td>${p.symbol}</td>
+            <td>${p.direction.toUpperCase()}</td>
+            <td>${p.entryPrice.toFixed(2)}</td>
+            <td>${p.closePrice ? p.closePrice.toFixed(2) : '-'}</td>
+            <td style="color:${p.status==='tp'?'var(--positive)':'var(--negative)'}">${p.status.toUpperCase()}</td>
+            <td style="color:${p.pnl>=0?'var(--positive)':'var(--negative)'}">${p.pnl.toFixed(2)}</td>
+            <td>${p.rMultiple.toFixed(2)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+  }
+
+  exportPaperTradingCSV() {
+    const csv = this.bot.paperTrading?.exportCSV?.();
+    if (!csv) { this.bot.notify?.warning('Paper CSV yok'); return; }
+    const blob = new Blob([csv], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `paper-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   renderPaternExperiences() {

@@ -52,6 +52,7 @@ import { vwap } from '../indicators/VWAP.js';
 import { bollinger } from '../indicators/Bollinger.js';
 import { CVD } from '../indicators/CVD.js';
 import { ApiQueue } from '../core/ApiQueue.js';
+import { PaperTrading } from '../paper/PaperTrading.js';
 
 // NOT: WatchlistManager / BacktestEngine (TradingCore ayrımı) / CloudSyncManager (Firebase/Telegram)
 // 10.08.2026 tarihinde proje sahibi tarafından açıkça REDDEDİLDİ — bir daha teklif edilmemeli
@@ -126,6 +127,7 @@ export class UltimateTradingCommandCenter {
     // ── Modüller ───────────────────────────────────────
     // CVD önce (stratejiler processTrade'de cvd'ye erişebilir)
     try { this.cvd = new CVD(500); } catch(e) { console.error('CVD init hatası', e); this.cvd = { update:()=>{}, getValue:()=>0, history:[], detectDivergence:()=>null }; }
+    try { this.paperTrading = new PaperTrading(this); } catch(e) { console.error('PaperTrading hatası', e); this.paperTrading = { openPosition:()=>null, update:()=>{}, getStats:()=>({}), history:[], positions:[] }; }
     try { this.strategies = createStrategies(this); } catch(e) { console.error('Strategies init hatası', e); this.strategies = {}; }
     try { this.confluenceEngine = new ConfluenceEngine(this); } catch(e) { console.error('ConfluenceEngine hatası', e); }
     try { this.multiTimeframeManager = new MultiTimeframeManager(this); } catch(e) { console.error('MultiTimeframeManager hatası', e); }
@@ -364,6 +366,8 @@ export class UltimateTradingCommandCenter {
     this.marketData.symbol = data.s;
     if (data.s === 'BTCUSDT') this.marketData.btcPrice = price;
     STATE.marketData = this.marketData;
+    // Paper trading update
+    try { this.paperTrading.update(price); } catch(_){}
     // Faz A #2: PositionManager.manageOpenPositions() ölü kod -> kaldırıldı (signals üzerinden checkAutoCloseSignals kullanılıyor)
     // this.positionManager.manageOpenPositions(); // DEPRECATED
     this.checkAutoCloseSignals();
@@ -832,6 +836,8 @@ export class UltimateTradingCommandCenter {
 
     if (signal.score >= 8 && !this.combatModeActive) this.activateCombatMode();
 
+    // Paper trading: sanal pozisyon aç
+    try { this.paperTrading.openPosition(signal); } catch(_){}
     // Slippage ölçümü
     setTimeout(() => this.confluenceEngine.measureSlippage?.(signal.price), 2000);
   }
@@ -1122,6 +1128,7 @@ export class UltimateTradingCommandCenter {
         this.ui.renderStrategyPerformance();
         this.ui.updateReputationCard();
         this.ui.renderPaternExperiences();
+        this.ui.updatePaperTrading();
       }
     } catch(_){}
     // BÖLÜM 3: Metrik kartları + sparkline + top-bids/asks güncelle
@@ -1593,6 +1600,7 @@ export class UltimateTradingCommandCenter {
     try { this.ui.renderStrategyPerformance(); } catch(_){}
     try { this.ui.updateReputationCard(); } catch(_){}
     try { this.ui.renderPaternExperiences(); } catch(_){}
+    try { this.ui.updatePaperTrading(); } catch(_){}
     try { this.ui.renderSignals(this.signals); } catch(_){}
   }
 
