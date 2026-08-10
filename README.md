@@ -233,10 +233,12 @@ npm test
 - [x] **P0 — Binance Dual WS Migration** (public/market split + Watchdog ✅ f1b1856)
 - [x] **Faz C — Görünürlük** (strateji performans paneli ✅, MTF özet + otomatik kehanet ✅, sinyal filtre/export ✅ `07f154b`)
 - [x] **Faz D (kısmi) — CVD + gerçek forceOrder + borsa-agnostik iskelet** (CVD ✅, `!forceOrder@arr` gerçek feed ✅, `BybitStream`/`OKXStream` stub + `StreamClass` enjeksiyonu ✅ `3e7687b`)
-- [ ] **Faz D (kalan) — Borsa seçici UI + REST adapter** (exchange-select, `fetchInitialData` borsa-duyarlı, Bybit/OKX gerçek WS)
-- [ ] **Faz D — Çoklu sembol WatchlistManager** (hafif ön-skor tarama, tam motor sadece seçili sembolde)
-- [ ] **Faz D — BacktestEngine** (TradingCore ayrımı + geçmiş mumla walk-forward, Bayes prior'a aktarım)
-- [ ] **Faz D — CloudSyncManager** (Firebase REST, StorageBridge write-behind, opt-in)
+- [x] **Faz D — Borsa seçici UI + REST adapter** (exchange-select ✅, `fetchInitialData` borsa-duyarlı ✅ `316ac11`)
+- ❌ **REDDEDİLDİ — WatchlistManager** (çoklu sembol tarama) — *kullanıcı isteği (10.08.2026): istenmiyor, bir daha teklif edilmesin*
+- ❌ **REDDEDİLDİ — BacktestEngine / TradingCore ayrımı** (replay/simülasyon/mock veri) — *kullanıcı isteği: saçmalık olarak nitelendirildi, teklif edilmesin*
+- ❌ **REDDEDİLDİ — CloudSyncManager / Firebase REST / Telegram** — *kullanıcı isteği: istenmiyor, teklif edilmesin*
+
+> **Not:** Yukarıdaki 3 madde proje sahibinin açık talebiyle reddedilmiştir. Kod içinde ve dokümanda bu not düşülmüştür, tekrar önerilmemelidir.
 
 ---
 

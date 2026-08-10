@@ -51,6 +51,12 @@ import { vwap } from '../indicators/VWAP.js';
 import { bollinger } from '../indicators/Bollinger.js';
 import { CVD } from '../indicators/CVD.js';
 
+// NOT: WatchlistManager / BacktestEngine (TradingCore ayrımı) / CloudSyncManager (Firebase/Telegram)
+// 10.08.2026 tarihinde proje sahibi tarafından açıkça REDDEDİLDİ — bir daha teklif edilmemeli
+// Gerekçe: replay/simülasyon/mock veri saçmalıkları istenmiyor
+// Bu not hem kodda hem README'de düşülmüştür
+
+
 const safeClone = (obj) => {
   try { return typeof structuredClone === 'function' ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)); }
   catch { return JSON.parse(JSON.stringify(obj)); }

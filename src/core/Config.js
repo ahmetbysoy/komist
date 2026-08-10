@@ -93,7 +93,7 @@ export const CONFIG = {
     watchdogMs: 60000,          // stream sessiz kalma eşiği (Watchdog)
     watchdogCheckMs: 30000
   },
-  // Faz D: Çoklu borsa seçeneği
+  // Faz D: Çoklu borsa seçeneği (Watchlist/Backtest/CloudSync REDDEDİLDİ - 10.08.2026, teklif edilmesin)
   exchanges: ['binance', 'bybit', 'okx'],
   defaultExchange: 'binance',
 

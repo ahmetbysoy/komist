@@ -1,3 +1,4 @@
+// NOT: WatchlistManager / BacktestEngine / CloudSyncManager REDDEDİLDİ (10.08.2026) — teklif edilmesin
 /**
  * ExchangeManager — Veri akışı (barva35 handleMarketData mantığı)
  * WS verilerini ilgili modüllere dağıtır:
