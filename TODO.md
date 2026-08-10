@@ -42,9 +42,9 @@
 ## FAZ 7 — Test & Build
 - [x] 20 birim test (strategies/confluence/panteon/indicators/utils) — geçti
 - [x] Vite build — 62 modül, 71 kB gzip
-- [ ] Dev server doğrulaması (canlı preview)
-- [ ] CI'da APK üretimi doğrulaması (push sonrası)
+- [x] Dev server doğrulaması (canlı preview)
+- [x] CI'da APK üretimi doğrulaması — SUCCESS (Debug + Release)
 
 ## FAZ 8 — Yayın
-- [ ] git commit + push (barva35 revizyonu)
-- [ ] CI'da APK artifact doğrulama (kullanıcı)
+- [x] git commit + push (barva35 revizyonu) — `cbb05d1`
+- [x] CI'da APK artifact doğrulama — 🚀-KOMUTA-MERKEZI-Debug/Release hazır
