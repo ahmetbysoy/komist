@@ -23,6 +23,15 @@ import { PositionManager } from '../risk/PositionManager.js';
 import { PantheonManager } from '../panteon/PantheonManager.js';
 import { MultiTimeframeManager } from '../confluence/MultiTimeframeManager.js';
 import { ExchangeManager } from '../data/ExchangeManager.js';
+import { BinanceStream } from '../data/BinanceStream.js';
+import { BybitStream } from '../data/BybitStream.js';
+import { OKXStream } from '../data/OKXStream.js';
+
+const EXCHANGE_STREAMS = {
+  binance: BinanceStream,
+  bybit: BybitStream,
+  okx: OKXStream
+};
 import { ChartManager } from '../render/ChartManager.js';
 import { HeatmapManager } from '../render/HeatmapManager.js';
 import { EffectsManager } from '../render/EffectsManager.js';
@@ -67,6 +76,7 @@ export class UltimateTradingCommandCenter {
     // StorageBridge ready olmadan getJsonSync hep null döner -> default kullan, init() içinde gerçek değer yüklenecek
     this.currentSymbol = CONFIG.defaultSymbol;
     this.currentTimeframe = CONFIG.defaultTimeframe;
+    this.currentExchange = CONFIG.defaultExchange || 'binance';
     this.headerCollapsed = true;
     this.currentMainView = 'chart';
     this.runtimeThresholdOffset = 0;
@@ -109,7 +119,10 @@ export class UltimateTradingCommandCenter {
     try { this.panteon = new PantheonManager(this); } catch(e) { console.error('Panteon hatası', e); }
     // panteon_state de async init() içinde yüklenecek (storage ready sonrası)
 
-    try { this.exchange = new ExchangeManager(this); } catch(e) { console.error('ExchangeManager hatası', e); }
+    try {
+      const StreamClass = EXCHANGE_STREAMS[this.currentExchange] || BinanceStream;
+      this.exchange = new ExchangeManager(this, StreamClass, this.currentExchange);
+    } catch(e) { console.error('ExchangeManager hatası', e); this.exchange = new ExchangeManager(this, BinanceStream, 'binance'); }
     try { this.chartManager = new ChartManager('live-chart'); } catch(e) { console.error('ChartManager hatası', e); this.chartManager = { setData:()=>{}, updateRealtime:()=>{}, addSignalMarker:()=>{}, clearMarkers:()=>{}, resize:()=>{}, zoomIn:()=>{}, zoomOut:()=>{}, resetZoom:()=>{}, updateTheme:()=>{} }; }
     try { this.heatmapManager = new HeatmapManager('orderbook-heatmap'); } catch(e) { console.error('HeatmapManager hatası', e); this.heatmapManager = { draw:()=>{}, resize:()=>{} }; }
     try { this.effects = new EffectsManager('effects-canvas'); } catch(e) { console.error('EffectsManager hatası', e); this.effects = { start:()=>{}, emit:()=>{}, stop:()=>{} }; }
@@ -149,12 +162,21 @@ export class UltimateTradingCommandCenter {
     if (persistedSettings) {
       this.settings = { ...safeClone(DEFAULT_SETTINGS), ...persistedSettings };
     }
-    // Sembol/timeframe kalıcılığı (Faz A #8)
+    // Sembol/timeframe/borsa kalıcılığı (Faz A #8 + Faz D)
     this.currentSymbol = this.storage.getJsonSync('utc_current_symbol') || CONFIG.defaultSymbol;
     this.currentTimeframe = this.storage.getJsonSync('utc_current_timeframe') || CONFIG.defaultTimeframe;
+    this.currentExchange = this.storage.getJsonSync('utc_current_exchange') || CONFIG.defaultExchange || 'binance';
+    // Exchange'i seçili borsaya göre yeniden oluştur (constructor'daki default'u ez)
+    try {
+      const StreamClass = EXCHANGE_STREAMS[this.currentExchange] || BinanceStream;
+      this.exchange = new ExchangeManager(this, StreamClass, this.currentExchange);
+    } catch(e) { console.error('Exchange re-init hatası', e); }
     this.marketData.symbol = this.currentSymbol;
     STATE.symbol = this.currentSymbol;
     STATE.timeframe = this.currentTimeframe;
+    STATE.exchange = this.currentExchange;
+    // UI'daki borsa seçiciyi güncelle
+    try { const sel = document.getElementById('exchange-select'); if (sel) sel.value = this.currentExchange; } catch(_){}
 
     // strategyStats kalıcılığı (Faz A #8)
     const persistedStats = this.storage.getJsonSync('utc_strategy_stats');
@@ -986,6 +1008,33 @@ export class UltimateTradingCommandCenter {
         if (candles.length) { this.candles = candles; this.chartManager.setData(candles); this.calculateAllIndicators(); }
       });
     }
+  }
+
+  changeExchange(exchangeName) {
+    const name = (exchangeName || '').toLowerCase().trim();
+    if (!['binance','bybit','okx'].includes(name)) {
+      this.notify?.warning(`Geçersiz borsa: ${exchangeName}`);
+      return;
+    }
+    this.currentExchange = name;
+    this.saveData('utc_current_exchange', name);
+    STATE.exchange = name;
+    // Yeni stream sınıfı ile exchange'i yeniden oluştur
+    const wasRunning = this.isRunning;
+    if (wasRunning) this.stop();
+    try {
+      const StreamClass = EXCHANGE_STREAMS[name] || BinanceStream;
+      this.exchange = new ExchangeManager(this, StreamClass, name);
+      this.notify?.info(`Borsa değiştirildi: ${name.toUpperCase()}`);
+      Logger.info('App', `Borsa: ${name}`);
+    } catch(e) {
+      Logger.error('App', 'changeExchange hatası', e);
+      this.notify?.warning('Borsa değiştirme hatası');
+    }
+    // UI'daki select'i güncelle
+    const sel = document.getElementById('exchange-select');
+    if (sel) sel.value = name;
+    if (wasRunning) this.start();
   }
 
   toggleTheme() {

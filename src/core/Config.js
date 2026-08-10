@@ -81,11 +81,21 @@ export const CONFIG = {
     // Legacy tek URL (deprecated, sadece /public verisi taşır — geriye dönük fallback için tutuluyor)
     binanceWs: 'wss://fstream.binance.com/stream?streams=',
     binanceRest: 'https://fapi.binance.com',
+    bybitRest: 'https://api.bybit.com',
+    okxRest: 'https://www.okx.com',
+    rest: {
+      binance: 'https://fapi.binance.com/fapi/v1/klines',
+      bybit: 'https://api.bybit.com/v5/market/kline',
+      okx: 'https://www.okx.com/api/v5/market/candles'
+    },
     reconnectBaseMs: 3000,
     reconnectCapMs: 30000,
     watchdogMs: 60000,          // stream sessiz kalma eşiği (Watchdog)
     watchdogCheckMs: 30000
   },
+  // Faz D: Çoklu borsa seçeneği
+  exchanges: ['binance', 'bybit', 'okx'],
+  defaultExchange: 'binance',
 
   zebani: {
     enabled: true,

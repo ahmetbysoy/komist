@@ -27,6 +27,10 @@ export class UIController {
     $('timeframe-select')?.addEventListener('change', (e) => {
       this.bot.changeTimeframe(e.target.value);
     });
+    // Faz D: Borsa seçici
+    $('exchange-select')?.addEventListener('change', (e) => {
+      this.bot.changeExchange(e.target.value);
+    });
 
     // Tema
     $('theme-toggle-btn')?.addEventListener('click', () => this.bot.toggleTheme());
