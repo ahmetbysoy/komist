@@ -44,7 +44,38 @@ export const DEFAULT_SETTINGS = {
     minWeightToStay: 0.60,
     minContribForToggle: 30,
     gating: { enabled: true, spreadMaxPct: 0.001, minDepthUsd: 50000 },
-    signalQuality: { minContributors: 2, minGroups: 1 }
+    signalQuality: { minContributors: 2, minGroups: 2 }
+  },
+
+  // ── Ceza sistemi (shadowban) ─────────────────────────
+  penalties: {
+    shadowEnabled: true,
+    minWeightToShadow: 0.60,
+    minContribForShadow: 30,
+    rehabWinRate: 0.58,
+    minShadowProposals: 20,
+    coolOffMs: 30 * 60 * 1000
+  },
+
+  statusMaps: {
+    shadowBanned: {},
+    hardBanned: {}
+  },
+
+  strategyParams: {
+    wallBounce: { DISTANCE_THRESHOLD_PERCENT: 0.0005 },
+    velocityScalping: { VELOCITY_WINDOW_MS: 2000, MIN_POINTS: 20, VELOCITY_THRESHOLD_PERCENT: 0.001 },
+    liquidityGaps: { GAP_THRESHOLD_PERCENT: 0.001 },
+    breakoutPattern: { LOOKBACK: 30, VOL_SPIKE: 1.4, BREAK_PCT: 0.0003 },
+    supportResistance: { LOOKBACK: 60, THRESH: 0.0015 },
+    fibonacciRetracement: { LOOKBACK: 120, TOL: 0.002 },
+    vwapReversion: { MULT: 1.0 },
+    superTrend: { MULT: 3.0, PERIOD: 14 },
+    marketStructure: { SWING: 3 },
+    institutionalOrderFlow: { TOP_N: 5, IMB_THRESHOLD: 2.0 },
+    microSpreadArbitrage: { SPREAD_PCT: 0.0008 },
+    volumeProfile: { PERIOD: 20, SPIKE: 2.0, CLOSE_POS: 0.7 },
+    divergenceDetection: { LOOKBACK: 40, SWING_PERIOD: 3 }
   },
 
   // ── Risk ─────────────────────────────────────────────

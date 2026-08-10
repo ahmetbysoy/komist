@@ -19,6 +19,8 @@
       <button id="panteon-toggle-btn" class="btn btn-tiny desktop-only" title="Panteon">🏛️</button>
       <button id="chart-view-btn" class="btn btn-tiny desktop-only" title="Grafik">📈</button>
       <button id="heatmap-view-btn" class="btn btn-tiny desktop-only" title="Isı Haritası">🔥</button>
+      <button id="honor-board-btn" class="btn btn-tiny desktop-only" title="Şeref Tablosu">🏆</button>
+      <button id="banned-board-btn" class="btn btn-tiny desktop-only" title="Banlılar">🚫</button>
       <button id="fullscreen-chart-btn" class="btn btn-tiny desktop-only" title="Tam Ekran">⛶</button>
       <button id="mobile-panteon-toggle-btn" class="btn btn-tiny mobile-only" title="Panteon">🏛️</button>
       <button id="mobile-fullscreen-chart-btn" class="btn btn-tiny mobile-only" title="Tam Ekran">⛶</button>
@@ -58,6 +60,8 @@
         <div class="header-right-controls">
           <button id="mobile-chart-view-btn" class="btn btn-tiny mobile-only" title="Grafik">📈</button>
           <button id="mobile-heatmap-view-btn" class="btn btn-tiny mobile-only" title="Isı Haritası">🔥</button>
+          <button id="mobile-honor-board-btn" class="btn btn-tiny mobile-only" title="Şeref Tablosu">🏆</button>
+          <button id="mobile-banned-board-btn" class="btn btn-tiny mobile-only" title="Banlılar">🚫</button>
           <button id="open-settings-modal-btn" class="btn btn-tiny desktop-only">Ayarlar</button>
         </div>
       </div>
@@ -273,6 +277,17 @@
           <button id="save-settings-btn" class="btn btn-success">Kaydet</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Şeref Tablosu Modal — Patch #7 -->
+  <div id="honor-modal-overlay" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); display:none; z-index:2600; align-items:center; justify-content:center;">
+    <div style="background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; width:90%; max-width:900px; max-height:90%; overflow:auto;">
+      <div style="padding:10px; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+        <div style="font-weight:700; color:var(--primary)">Şeref Tablosu</div>
+        <button id="close-honor-modal" class="btn btn-tiny">Kapat</button>
+      </div>
+      <div id="honor-modal-body" style="padding:12px;"></div>
     </div>
   </div>
 

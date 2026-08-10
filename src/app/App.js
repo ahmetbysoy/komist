@@ -199,6 +199,8 @@ export class UltimateTradingCommandCenter {
     // Panteon modları yüklendikten sonra threshold/cooldown etkileri güncel kalsın
     STATE.strategyStats = this.strategyStats;
 
+    this.applyStrategyParamOverrides();
+
     document.body.classList.add('header-collapsed');
     this.effects.start();
     this.updateSession();
@@ -246,6 +248,9 @@ export class UltimateTradingCommandCenter {
 
     this.renderInterval = setInterval(() => this.render(), 500);
     this.analysisInterval = setInterval(() => this.runPeriodicAnalysis(), 5000);
+    if (this.settings.optimization.enabled) {
+      this.paramTuneInterval = setInterval(() => this.autoTuneStrategyParams(), 5 * 60 * 1000);
+    }
     document.getElementById('start-btn').disabled = true;
     document.getElementById('stop-btn').disabled = false;
   }
@@ -256,6 +261,7 @@ export class UltimateTradingCommandCenter {
     this.multiTimeframeManager.cleanup();
     clearInterval(this.renderInterval);
     clearInterval(this.analysisInterval);
+    if (this.paramTuneInterval) clearInterval(this.paramTuneInterval);
     this.ui.updateConnection(false, 'DURDURULDU');
     Logger.info('App', 'Sistem durduruldu');
     this.notify.warning('Sistem durduruldu.');
@@ -443,6 +449,18 @@ export class UltimateTradingCommandCenter {
       stats[key] = { overall: { ...base }, trend: { ...base }, range: { ...base }, transition: { ...base } };
     }
     return stats;
+  }
+
+  applyStrategyParamOverrides() {
+    const p = this.settings.strategyParams || {};
+    for (const key of Object.keys(this.strategies)) {
+      const inst = this.strategies[key];
+      if (!inst) continue;
+      const ov = p[key] || {};
+      for (const k of Object.keys(ov)) {
+        if (k in inst) inst[k] = ov[k];
+      }
+    }
   }
 
   getStrategyWeight(name) {
@@ -704,6 +722,9 @@ export class UltimateTradingCommandCenter {
     }
     this.saveStrategyStats();
     STATE.strategyStats = this.strategyStats;
+    // Patch #2: Gölge istatistikleri ve rehab
+    try { this.updateStrategyShadowStats(signal); } catch(e) { Logger.error('ShadowStats', e); }
+    try { this.evaluateShadowRehab(); } catch(e) { Logger.error('ShadowRehab', e); }
     // Faz C: Strateji performans panelini canlı yenile (modal açıksa)
     try {
       const overlay = document.getElementById('settings-modal-overlay');
@@ -755,9 +776,69 @@ export class UltimateTradingCommandCenter {
     }
   }
 
+  updateStrategyShadowStats(signal) {
+    const windowMs = (this.settings.cooldowns?.proposalTimeoutMs || 3000) * 2;
+    const start = signal.timestamp - windowMs;
+    const end = signal.timestamp;
+    const creditBase = 0.5;
+    const byStrat = {};
+    for (const p of this.shadowProposals) {
+      if (p.timestamp >= start && p.timestamp <= end && p.direction === signal.direction) {
+        byStrat[p.strategy] = p;
+      }
+    }
+    for (const strat of Object.keys(byStrat)) {
+      let st = this.strategyStats[strat];
+      if (!st) {
+        st = this.initDefaultStrategyStats()[strat];
+        if (!st) continue;
+        this.strategyStats[strat] = st;
+      }
+      // overall ve rejim ayrı ayrı güncelle
+      const targets = [st.overall, st[this.marketRegime]].filter(Boolean);
+      for (const target of targets) {
+        target.shadowProposals = (target.shadowProposals || 0) + 1;
+        if (signal.status === 'tp') {
+          target.shadowWins = (target.shadowWins || 0) + 1;
+          target.alpha = (target.alpha || 3) + creditBase;
+        } else if (signal.status === 'sl') {
+          target.shadowLosses = (target.shadowLosses || 0) + 1;
+          target.beta = (target.beta || 2) + creditBase;
+        }
+        target.lastUpdate = Date.now();
+      }
+    }
+    const keepAfter = Date.now() - 10 * 60 * 1000;
+    this.shadowProposals = this.shadowProposals.filter(p => p.timestamp >= keepAfter);
+    this.saveStrategyStats();
+  }
+
+  evaluateShadowRehab() {
+    const pen = this.settings.penalties || {};
+    if (!pen.shadowEnabled) return;
+    for (const key of Object.keys(this.strategies)) {
+      if (!this.settings.statusMaps.shadowBanned[key]) continue;
+      if (this.settings.statusMaps.hardBanned[key]) continue;
+      const st = this.strategyStats[key]?.overall || {};
+      const sw = st.shadowWins || 0, sl = st.shadowLosses || 0, sp = st.shadowProposals || 0;
+      const total = sw + sl;
+      const winRate = total > 0 ? sw / total : 0;
+      if (sp >= (pen.minShadowProposals || 20) && winRate >= (pen.rehabWinRate || 0.58)) {
+        this.settings.activeStrategies[key] = true;
+        this.settings.statusMaps.shadowBanned[key] = false;
+        this.updateActiveStrategies();
+        this.saveSettings();
+        this.showNotification(`Rehabilite: ${this.strategies[key].displayName} tekrar canlı! (gölge WR=${(winRate*100).toFixed(0)}%)`, 'success');
+        if (this.settings.features.enableTTS) this.speak(this.getRandomMessage('shadowRehab', { 'Strateji': this.strategies[key].displayName }));
+      }
+    }
+  }
+
   autoToggleStrategies() {
     const opt = this.settings.optimization || {};
-    if (!opt.autoToggle) return;
+    const pen = this.settings.penalties || {};
+    // Shadowban kapalıysa ve autoToggle kapalıysa çık
+    if (!opt.autoToggle && !pen.shadowEnabled) return;
     const nowMs = Date.now();
 
     for (const key of this.strategyKeys) {
@@ -766,18 +847,34 @@ export class UltimateTradingCommandCenter {
       if (!inst || !stats) continue;
       const w = this.getStrategyWeight(key);
 
-      // Shadow ban: zayıf + yeterli katkı
-      if (w < (opt.minWeightToStay ?? 0.6) && (stats.contrib || 0) >= (opt.minContribForToggle ?? 30) && inst._isLive) {
+      // Shadow ban: zayıf + yeterli katkı (penalties öncelikli, fallback optimization)
+      const minWeight = pen.minWeightToShadow ?? opt.minWeightToStay ?? 0.60;
+      const minContrib = pen.minContribForShadow ?? opt.minContribForToggle ?? 30;
+      if (w < minWeight && (stats.contrib || 0) >= minContrib && inst._isLive) {
         inst.setIsLive(false);
+        this.settings.activeStrategies[key] = false;
+        this.settings.statusMaps.shadowBanned[key] = true;
         stats.lastShadowToggle = nowMs;
+        this.saveSettings();
+        this.updateActiveStrategies();
         this.notify.warning(`Oto-optimizasyon: ${inst.displayName} gölgeye alındı (w=${w.toFixed(2)})`);
+        if (this.settings.features.enableTTS) this.speak(this.getRandomMessage('shadowBan', { 'Strateji': inst.displayName }));
       }
-      // Rehabilitasyon: gölgede iyi performans
-      if (!inst._isLive) {
+      // Rehabilitasyon: gölgede iyi performans (sadece shadowBanned, hardBanned değil)
+      if (!inst._isLive && this.settings.statusMaps.shadowBanned[key] && !this.settings.statusMaps.hardBanned[key]) {
         const sr = stats.shadowProposals >= 20 ? stats.shadowWins / stats.shadowProposals : 0;
-        if (sr >= 0.58 && nowMs - (stats.lastShadowToggle || 0) > 1800000) {
+        const minShadowProposals = pen.minShadowProposals || 20;
+        const rehabWR = pen.rehabWinRate || 0.58;
+        const coolOff = pen.coolOffMs || 30*60*1000;
+        // Eski evaluateShadowRehab ile aynı mantık ama burda da kontrol (çift koruma)
+        if (stats.shadowProposals >= minShadowProposals && sr >= rehabWR && nowMs - (stats.lastShadowToggle || 0) > coolOff) {
           inst.setIsLive(true);
+          this.settings.activeStrategies[key] = true;
+          this.settings.statusMaps.shadowBanned[key] = false;
+          this.saveSettings();
+          this.updateActiveStrategies();
           this.notify.success(`Rehabilite: ${inst.displayName} tekrar canlı! (gölge WR=${(sr * 100).toFixed(0)}%)`);
+          if (this.settings.features.enableTTS) this.speak(this.getRandomMessage('shadowRehab', { 'Strateji': inst.displayName }));
         }
       }
     }
@@ -895,6 +992,58 @@ export class UltimateTradingCommandCenter {
     }, 60000);
   }
 
+  autoTuneStrategyParams() {
+    if (!this.settings.optimization.enabled) return;
+    const step = 0.1;
+    const meta = {
+      wallBounce: { DISTANCE_THRESHOLD_PERCENT: {min:0.0001,max:0.001, strict:'up'} },
+      velocityScalping: { VELOCITY_THRESHOLD_PERCENT:{min:0.0005,max:0.003, strict:'up'} },
+      liquidityGaps: { GAP_THRESHOLD_PERCENT:{min:0.0003,max:0.003, strict:'up'} },
+      breakoutPattern: { BREAK_PCT:{min:0.0001,max:0.001, strict:'up'}, VOL_SPIKE:{min:1.0,max:3.0, strict:'up'} },
+      supportResistance: { THRESH:{min:0.0005,max:0.005, strict:'down'} },
+      fibonacciRetracement: { TOL:{min:0.0005,max:0.005, strict:'down'} },
+      vwapReversion: { MULT:{min:0.6,max:2.0, strict:'up'} },
+      superTrend: { MULT:{min:1.0,max:6.0, strict:'up'} },
+      marketStructure: { SWING:{min:2,max:7, strict:'up'} },
+      institutionalOrderFlow: { IMB_THRESHOLD:{min:1.2,max:4.0, strict:'up'} },
+      microSpreadArbitrage: { SPREAD_PCT:{min:0.0003,max:0.003, strict:'up'} },
+      volumeProfile: { PERIOD: {min:20,max:30, strict:'up'}, SPIKE:{min:1.2,max:3.0, strict:'up'}, CLOSE_POS:{min:0.5,max:0.9, strict:'up'} },
+      divergenceDetection: { SWING_PERIOD:{min:2,max:5, strict:'up'} }
+    };
+    const p = this.settings.strategyParams;
+    let changed = false;
+    for (const key of Object.keys(this.strategies)) {
+      const w = this.getStrategyWeight(key);
+      const defs = meta[key]; if (!defs) continue;
+      const cur = p[key] || {}; let localChanged = false;
+      const direction = (w < 0.7) ? 'moreStrict' : (w > 1.3 ? 'lessStrict' : 'keep');
+      if (direction === 'keep') continue;
+      for (const par of Object.keys(defs)) {
+        const conf = defs[par]; const val = cur[par] ?? this.strategies[key][par];
+        if (val == null) continue;
+        let newVal = val;
+        if (direction === 'moreStrict') {
+          if (conf.strict === 'up') newVal = val * (1 + step);
+          else if (conf.strict === 'down') newVal = val * (1 - step);
+        } else if (direction === 'lessStrict') {
+          if (conf.strict === 'up') newVal = val * (1 - step);
+          else if (conf.strict === 'down') newVal = val * (1 + step);
+        }
+        newVal = Math.max(conf.min, Math.min(conf.max, newVal));
+        if (Math.abs(newVal - val) / Math.max(1e-8, val) > 0.02) {
+          cur[par] = (typeof val === 'number' && Number.isInteger(val)) ? Math.round(newVal) : parseFloat(newVal.toFixed(6));
+          localChanged = true;
+        }
+      }
+      if (localChanged) { p[key] = cur; changed = true; }
+    }
+    if (changed) {
+      this.saveSettings();
+      this.applyStrategyParamOverrides();
+      this.showNotification('Strateji parametreleri mikro-optimize edildi (ameliyat).', 'warning');
+    }
+  }
+
   // ═════════════════════════════════════════════════════
   // KOMBAT MODU & GÖRSEL
   // ═════════════════════════════════════════════════════
@@ -924,8 +1073,9 @@ export class UltimateTradingCommandCenter {
     const messages = {
       buy: ['Olimpos\'un rüzgarı arkana esecek...', 'Metatron fısıldıyor: alım gücü artıyor...', 'Uriel mızrağını kaldırdı!'],
       sell: ['Kılıçlar kınına dönüyor...', 'Raphael uyardı: satış baskısı büyüyor...', 'O vakit geldi...'],
-      shadowBan: ['Strateji gölgeye alındı.', 'Şüpheli performans — izlemeye çekildi.'],
-      shadowRehab: ['Strateji tekrar canlı!', 'Gölgeden dönüş, zafer gibi kokuyor.']
+      shadowBan: ['[Strateji] gölgeye alındı. Uslan da gel!', 'Şşşt [Strateji], gölge moduna geç. Önce pistte kendini ispat et.'],
+      shadowRehab: ['Bravo! [Strateji] gölgede form tuttu, tekrar sahnede.', '[Strateji] rehabilite edildi. Hadi bakalım, yüzümüzü kara çıkarma!'],
+      rogueOfDay: ['Bugünün şerefsizi: [Strateji]! Kendine gel de adam gibi sinyal ver.', '[Strateji], bugün gözüm üzerinde. Şerefsizlikte ısrar etme!']
     };
     const list = messages[type] || ['İşlem zamanı.'];
     let msg = list[Math.floor(Math.random() * list.length)];
@@ -1189,6 +1339,127 @@ export class UltimateTradingCommandCenter {
   exitFullscreenChart() {
     document.body.classList.remove('fullscreen-chart');
     setTimeout(() => this.chartManager?.resize(), 100);
+  }
+
+  // ── Şeref Tablosu / Banlılar (Patch #7) ──────────────────
+  openHonorModal(filter = 'all') {
+    const el = document.getElementById('honor-modal-body');
+    if (!el) return;
+    const honor = [], shame = [], banned = [];
+    const minContrib = 10;
+    for (const key of this.strategyKeys) {
+      const st = this.strategyStats[key]?.overall || {};
+      const w = this.getStrategyWeight(key);
+      const active = !!this.settings.activeStrategies[key];
+      const isShadow = !!this.settings.statusMaps.shadowBanned[key];
+      const isHard = !!this.settings.statusMaps.hardBanned[key];
+      const contrib = st.contrib || 0;
+      const wins = (st.wins || 0) + (st.shadowWins || 0);
+      const losses = (st.losses || 0) + (st.shadowLosses || 0);
+      const total = wins + losses;
+      const wr = total > 0 ? (wins / total * 100) : 0;
+      const row = { key, name: this.strategies[key]?.displayName || key, w, wr, contrib, status: isHard ? 'HARDBAN' : (isShadow ? 'GÖLGE' : (active ? 'CANLI' : 'PASİF')) };
+      if (isShadow || isHard) banned.push(row);
+      if (!isShadow && !isHard) {
+        if (w >= 1.1 && total >= minContrib) honor.push(row);
+        else if (w <= 0.8 && contrib >= minContrib) shame.push(row);
+      }
+    }
+    const pickRogue = shame.sort((a,b) => a.w - b.w)[0];
+    const renderList = (title, arr, empty='-') => `
+      <div class="panel-title" style="margin:6px 0;">${title}</div>
+      <div class="data-table-container" style="max-height:240px;">
+        <table class="data-table">
+          <thead><tr><th>Strateji</th><th>w</th><th>WR%</th><th>Katkı</th><th>Durum</th><th>Aksiyon</th></tr></thead>
+          <tbody>
+            ${arr.length ? arr.map(r => `
+              <tr>
+                <td>${r.name}</td><td>${r.w.toFixed(2)}</td><td>${r.wr.toFixed(0)}</td><td>${r.contrib}</td><td>${r.status}</td>
+                <td>
+                  <button class="btn btn-tiny" onclick="window.app.toggleShadow('${r.key}')">${this.settings.statusMaps.shadowBanned[r.key]?'Gölgeden Al':'Gölge'}</button>
+                  <button class="btn btn-tiny" onclick="window.app.toggleHardBan('${r.key}')">${this.settings.statusMaps.hardBanned[r.key]?'Unban':'HardBan'}</button>
+                  <button class="btn btn-tiny" onclick="window.app.openStrategySurgery('${r.key}')">Ameliyat</button>
+                </td>
+              </tr>
+            `).join('') : `<tr><td colspan="6">${empty}</td></tr>`}
+          </tbody>
+        </table>
+      </div>`;
+    let html = '';
+    if (filter === 'banned') {
+      html += renderList('Banlılar (Gölge/HardBan)', banned, 'Kimse banlı değil.');
+    } else {
+      if (pickRogue) {
+        html += `<div class="notification danger" style="position:relative; margin-bottom:10px;">Günün şerefsizi: <b>${pickRogue.name}</b> (w=${pickRogue.w.toFixed(2)})</div>`;
+        if (this.settings.features.enableTTS) this.speak(this.getRandomMessage('rogueOfDay', { 'Strateji': pickRogue.name }));
+      }
+      html += renderList('Şerefli (güçlüler)', honor.sort((a,b)=>b.w-a.w), 'Şimdilik yok.');
+      html += renderList('Şerefsizler (zayıflar)', shame.sort((a,b)=>a.w-b.w), 'Bugün herkes uslu.');
+      html += renderList('Banlılar (Gölge/HardBan)', banned, 'Kimse banlı değil.');
+    }
+    el.innerHTML = html;
+    const overlay = document.getElementById('honor-modal-overlay');
+    if (overlay) overlay.style.display = 'flex';
+    this.lastHonorModalFilter = filter;
+  }
+
+  closeHonorModal() {
+    const overlay = document.getElementById('honor-modal-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  toggleShadow(key) {
+    const cur = !!this.settings.statusMaps.shadowBanned[key];
+    this.settings.statusMaps.shadowBanned[key] = !cur;
+    this.settings.activeStrategies[key] = cur ? true : false;
+    this.updateActiveStrategies();
+    this.saveSettings();
+    this.openHonorModal(this.lastHonorModalFilter);
+    this.showNotification(`${this.strategies[key].displayName} ${cur ? 'gölgeden alındı' : 'gölgeye alındı'}.`, 'info');
+    if (this.settings.features.enableTTS) this.speak(this.getRandomMessage(cur ? 'shadowRehab' : 'shadowBan', { 'Strateji': this.strategies[key].displayName }));
+  }
+
+  toggleHardBan(key) {
+    const cur = !!this.settings.statusMaps.hardBanned[key];
+    this.settings.statusMaps.hardBanned[key] = !cur;
+    if (this.settings.statusMaps.hardBanned[key]) {
+      this.settings.statusMaps.shadowBanned[key] = true;
+      this.settings.activeStrategies[key] = false;
+    } else {
+      this.settings.statusMaps.shadowBanned[key] = false;
+    }
+    this.updateActiveStrategies();
+    this.saveSettings();
+    this.openHonorModal(this.lastHonorModalFilter);
+    this.showNotification(`${this.strategies[key].displayName} ${cur ? 'hardbandan çıkarıldı' : 'hardban edildi'}.`, cur ? 'success' : 'danger');
+  }
+
+  openStrategySurgery(key) {
+    const defs = this.settings.strategyParams[key] || {};
+    let form = `<div class="panel-title" style="margin-top:10px;">${this.strategies[key].displayName} - Ameliyat</div>`;
+    form += `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:8px 0;">`;
+    for (const k of Object.keys(defs)) {
+      form += `<label style="font-size:11px; color:var(--text-secondary)">${k}</label><input type="number" step="0.000001" value="${defs[k]}" data-par="${k}" data-strat="${key}" class="form-control strat-par-input">`;
+    }
+    form += `</div><button class="btn btn-success btn-sm" onclick="window.app.saveStrategySurgery('${key}')">Kaydet</button>`;
+    const el = document.getElementById('honor-modal-body');
+    if (!el) return;
+    el.insertAdjacentHTML('beforeend', form);
+    el.querySelectorAll('.strat-par-input').forEach(inp=>{
+      inp.addEventListener('change', (e)=>{
+        const strat = e.target.dataset.strat;
+        const par = e.target.dataset.par;
+        const val = parseFloat(e.target.value);
+        if (!isNaN(val)) this.settings.strategyParams[strat][par] = val;
+      });
+    });
+  }
+
+  saveStrategySurgery(key) {
+    this.saveSettings();
+    this.applyStrategyParamOverrides();
+    this.showNotification(`${this.strategies[key].displayName} parametreleri güncellendi.`, 'success');
+    this.openHonorModal(this.lastHonorModalFilter);
   }
 
   setView(view) {

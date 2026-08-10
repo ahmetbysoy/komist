@@ -125,6 +125,14 @@ export class UIController {
     // Grafiktir sinyallerini sil
     $('clear-markers-btn')?.addEventListener('click', () => this.bot.chartManager?.clearMarkers());
 
+    // Patch #7: Şeref Tablosu / Banlılar
+    $('honor-board-btn')?.addEventListener('click', () => this.bot.openHonorModal());
+    $('banned-board-btn')?.addEventListener('click', () => this.bot.openHonorModal('banned'));
+    $('mobile-honor-board-btn')?.addEventListener('click', () => this.bot.openHonorModal());
+    $('mobile-banned-board-btn')?.addEventListener('click', () => this.bot.openHonorModal('banned'));
+    $('close-honor-modal')?.addEventListener('click', () => this.bot.closeHonorModal());
+    $('honor-modal-overlay')?.addEventListener('click', (e) => { if (e.target.id === 'honor-modal-overlay') this.bot.closeHonorModal(); });
+
     // ── Faz C: Sinyal filtreleri ───────────────────────
     $('filter-signal-direction')?.addEventListener('change', (e) => {
       this.signalFilters.direction = e.target.value;
