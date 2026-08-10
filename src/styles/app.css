@@ -35,6 +35,7 @@ body {
   display: flex;
   position: fixed; top: 0; left: 0; width: 100%;
   background: var(--panel-bg);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
   padding: 4px 10px;
   z-index: 1100;
@@ -62,7 +63,7 @@ body {
 .signal-bar-wrapper { display: flex; align-items: center; gap: 4px; flex: 1; }
 .signal-bar-label { font-size: 8px; color: var(--text-secondary); white-space: nowrap; }
 .signal-bar { flex: 1; height: 8px; background: var(--input-bg); border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color); }
-.signal-bar-fill { height: 100%; width: 0%; transition: width .3s ease; }
+.signal-bar-fill { height: 100%; width: 0%; transition: width .4s cubic-bezier(0.4, 0, 0.2, 1); }
 .signal-bar-fill.buy { background: linear-gradient(90deg, #28a745, #10b981); }
 .signal-bar-fill.sell { background: linear-gradient(90deg, #dc3545, #fd7e14); }
 .signal-score-text { font-size: 10px; font-weight: 700; color: var(--text-main); min-width: 26px; text-align: right; }
@@ -111,11 +112,14 @@ body.header-collapsed .header-collapsible-content { max-height: 0; opacity: 0; p
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 #28a745b3; } 70% { box-shadow: 0 0 0 6px #28a74500; } 100% { box-shadow: 0 0 0 0 #28a74500; } }
 
 .btn {
-  padding: 6px 10px; border: 1px solid var(--border-color);
+  padding: 8px 12px; border: 1px solid var(--border-color);
   background: var(--panel-bg); color: var(--text-main);
-  border-radius: 4px; cursor: pointer; font-family: 'Roboto Mono', monospace;
-  font-size: 11px; transition: all .2s;
+  border-radius: 8px; cursor: pointer; font-family: 'Roboto Mono', monospace;
+  font-size: 11px; transition: all .2s; min-height: 36px; min-width: 44px;
+  backdrop-filter: blur(8px);
 }
+.btn:active { transform: scale(0.97); }
+.btn:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(88,166,255,0.2); }
 .btn:hover { background: var(--hover-bg); border-color: var(--primary); }
 .btn:active { transform: scale(.97); }
 .btn-success { background: var(--positive); color: white; border-color: var(--positive); }
@@ -124,7 +128,8 @@ body.header-collapsed .header-collapsible-content { max-height: 0; opacity: 0; p
 
 .price-display { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; font-size: 10px; }
 .price-item .price-label { color: var(--text-secondary); }
-.price-item .price-value { font-size: 15px; font-weight: 700; }
+.price-item .price-value { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+.price-item .price-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.8; }
 .price-item.countdown { grid-column: 1 / -1; text-align: center; color: var(--neutral); font-weight: 700; }
 
 /* ═══ ANA GRID ═══ */
@@ -136,7 +141,7 @@ body.header-collapsed .header-collapsible-content { max-height: 0; opacity: 0; p
 }
 body.header-collapsed .main-grid { height: calc(100vh - var(--ticker-height) - var(--signal-bar-height) - 20px); }
 
-.panel { display: flex; flex-direction: column; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
+.panel { display: flex; flex-direction: column; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; backdrop-filter: blur(12px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
 .center-panel { display: grid; grid-template-rows: 1fr; gap: 5px; padding: 0 !important; }
 .data-container { display: grid; grid-template-rows: 1fr auto; overflow: hidden; height: 100%; }
 .data-grid { position: relative; min-height: 0; }
