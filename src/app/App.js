@@ -78,6 +78,12 @@ export class UltimateTradingCommandCenter {
     this.candles = [];
     this.indicators = { rsi: [], atr: null, sma20: null, sma50: null, volSma20: null, vwap: null, adx: null, bbands: null };
 
+    // ── Strateji haritaları (barva35) ──────────────────
+    // ÖNCE haritalar tanımlanmalı ki initDefaultStrategyStats() içinde kullanılabilsin (Faz C fix)
+    this.strategyAmbassadors = STRATEGY_AMBASSADORS;
+    this.strategyGroups = STRATEGY_GROUPS;
+    this.strategyKeys = Object.keys(STRATEGY_CLASSES);
+
     // ── Sinyaller & istatistikler ──────────────────────
     this.signals = [];
     this.pendingSignals = [];
@@ -88,11 +94,6 @@ export class UltimateTradingCommandCenter {
     this.marketRegime = 'unknown';
     // REMOVED: this.positions = [] -> ölü sistem (Faz A #2). Pozisyon takibi signals üzerinden (checkAutoCloseSignals) yapılıyor.
     // PositionManager.manageOpenPositions() artık no-op / deprecated. Geriye dönük uyum için boş dizi bırakma, tamamen kaldırıldı.
-
-    // ── Strateji haritaları (barva35) ──────────────────
-    this.strategyAmbassadors = STRATEGY_AMBASSADORS;
-    this.strategyGroups = STRATEGY_GROUPS;
-    this.strategyKeys = Object.keys(STRATEGY_CLASSES);
 
     // ── Modüller ───────────────────────────────────────
     // CVD önce (stratejiler processTrade'de cvd'ye erişebilir)
@@ -408,7 +409,9 @@ export class UltimateTradingCommandCenter {
   initDefaultStrategyStats() {
     const base = { alpha: 3, beta: 2, proposals: 0, contrib: 0, wins: 0, losses: 0, shadowWins: 0, shadowLosses: 0, shadowProposals: 0, lastUpdate: Date.now() };
     const stats = {};
-    for (const key of this.strategyKeys) {
+    // Fallback: eğer strategyKeys henüz tanımlı değilse (constructor sırası hatası) doğrudan STRATEGY_CLASSES'ten al
+    const keys = this.strategyKeys || Object.keys(STRATEGY_CLASSES);
+    for (const key of keys) {
       stats[key] = { overall: { ...base }, trend: { ...base }, range: { ...base }, transition: { ...base } };
     }
     return stats;

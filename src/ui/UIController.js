@@ -406,7 +406,7 @@ export class UIController {
 
     tbody.innerHTML = filtered.slice(0, 50).map((s) => `
       <tr style="cursor:pointer" title="Tıkla: detay, Çift tıkla: TP/SL göster">
-        <td>${new Date(s.timestamp).toLocaleTimeString('tr-TR')}</td>
+        <td>${(() => { try { return new Date(s.timestamp).toLocaleTimeString('tr-TR'); } catch(e) { try { return new Date(s.timestamp).toLocaleTimeString('en-US'); } catch { return new Date(s.timestamp).toISOString().slice(11,19); } } })()}</td>
         <td>${s.symbol || STATE.symbol}</td>
         <td>${s.direction?.toUpperCase() || '-'}</td>
         <td>${formatPrice(s.price)}</td>

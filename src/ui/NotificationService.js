@@ -34,6 +34,7 @@ export class NotificationService {
   success(msg) { this.show(msg, 'success'); }
   danger(msg) { this.show(msg, 'danger'); }
   warning(msg) { this.show(msg, 'warning'); }
+  info(msg) { this.show(msg, 'info'); }
 }
 
 export default NotificationService;

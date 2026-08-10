@@ -16,14 +16,25 @@ const PRESETS = {
 export class EffectsManager {
   constructor(canvasId = 'effects-canvas') {
     this.canvas = document.getElementById(canvasId);
-    this.ctx = this.canvas?.getContext('2d');
+    // effects-canvas barva35'te div (tsparticles için), canvas değil — getContext kontrolü ekle
+    if (this.canvas && typeof this.canvas.getContext === 'function') {
+      this.ctx = this.canvas.getContext('2d');
+    } else {
+      // Canvas değilse (div) veya yoksa, görünmez canvas oluştur veya no-op yap
+      this.ctx = null;
+      // Eğer div ise, içine gizli canvas oluşturmayı dene (opsiyonel)
+      if (this.canvas && this.canvas.tagName !== 'CANVAS') {
+        // Div için tsparticles kullanıldığı varsayılır, partikül canvas'ı ayrı yönetilecek
+        this.ctx = null;
+      }
+    }
     this.particles = [];
     this.running = false;
     this.enabled = true;
   }
 
   start() {
-    if (!this.ctx || this.running) return;
+    if (!this.ctx || this.running || typeof this.canvas?.getContext !== 'function') return;
     this.running = true;
     const loop = () => {
       this._tick();
@@ -75,7 +86,7 @@ export class EffectsManager {
   }
 
   _tick() {
-    if (!this.ctx || !this.canvas) return;
+    if (!this.ctx || !this.canvas || typeof this.canvas.getContext !== 'function') return;
     const { w, h } = this._size();
     this.ctx.clearRect(0, 0, w, h);
     const nowMs = performance.now();
