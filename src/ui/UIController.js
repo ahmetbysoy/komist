@@ -123,7 +123,26 @@ export class UIController {
     $('mobile-open-log-modal-btn')?.addEventListener('click', () => this.bot.exportLogs?.());
 
     // Grafiktir sinyallerini sil
+    try { this.heatmapManager = new HeatmapManager('orderbook-heatmap'); } catch(e) { console.error('HeatmapManager hatası', e); this.heatmapManager = { draw:()=>{}, resize:()=>{} }; }
+    try { this.tieredOrderBook = new TieredOrderBook('tiered-orderbook'); } catch(e) { console.error('TieredOrderBook hatası', e); this.tieredOrderBook = { render:()=>{}, clear:()=>{} }; }
+
+    // Grafiktir sinyallerini sil
     $('clear-markers-btn')?.addEventListener('click', () => this.bot.chartManager?.clearMarkers());
+
+    // Kademeli Emir Defteri toggle (3s1.html)
+    $('heatmap-view-heatmap-btn')?.addEventListener('click', () => {
+      const canvas = document.getElementById('orderbook-heatmap');
+      const tiered = document.getElementById('tiered-orderbook');
+      if (canvas) canvas.style.display = 'block';
+      if (tiered) tiered.style.display = 'none';
+    });
+    $('heatmap-view-tiered-btn')?.addEventListener('click', () => {
+      const canvas = document.getElementById('orderbook-heatmap');
+      const tiered = document.getElementById('tiered-orderbook');
+      if (canvas) canvas.style.display = 'none';
+      if (tiered) tiered.style.display = 'block';
+      try { this.bot.tieredOrderBook?.render(this.bot.orderBook, this.bot.symbolInfo?.tickSize); } catch(_){}
+    });
 
     // Akordeon Ayarlar (BÖLÜM 3) — panel-title'a tıklayınca grubu aç/kapat
     document.querySelectorAll('.settings-group .panel-title').forEach(title => {

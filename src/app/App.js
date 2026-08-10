@@ -34,6 +34,7 @@ const EXCHANGE_STREAMS = {
 };
 import { ChartManager } from '../render/ChartManager.js';
 import { HeatmapManager } from '../render/HeatmapManager.js';
+import { TieredOrderBook } from '../render/TieredOrderBook.js';
 import { EffectsManager } from '../render/EffectsManager.js';
 import { UIController } from '../ui/UIController.js';
 import { NotificationService } from '../ui/NotificationService.js';
@@ -142,6 +143,7 @@ export class UltimateTradingCommandCenter {
     } catch(e) { console.error('ExchangeManager hatası', e); this.exchange = new ExchangeManager(this, BinanceStream, 'binance'); }
     try { this.chartManager = new ChartManager('live-chart'); } catch(e) { console.error('ChartManager hatası', e); this.chartManager = { setData:()=>{}, updateRealtime:()=>{}, addSignalMarker:()=>{}, clearMarkers:()=>{}, resize:()=>{}, zoomIn:()=>{}, zoomOut:()=>{}, resetZoom:()=>{}, updateTheme:()=>{} }; }
     try { this.heatmapManager = new HeatmapManager('orderbook-heatmap'); } catch(e) { console.error('HeatmapManager hatası', e); this.heatmapManager = { draw:()=>{}, resize:()=>{} }; }
+    try { this.tieredOrderBook = new TieredOrderBook('tiered-orderbook'); } catch(e) { console.error('TieredOrderBook hatası', e); this.tieredOrderBook = { render:()=>{}, clear:()=>{} }; }
     try { this.effects = new EffectsManager('effects-canvas'); } catch(e) { console.error('EffectsManager hatası', e); this.effects = { start:()=>{}, emit:()=>{}, stop:()=>{} }; }
     try { this.notify = new NotificationService('notifications-container'); } catch(e) { console.error('NotificationService hatası', e); this.notify = { info:console.log, warning:console.log, success:console.log, danger:console.log, show:console.log }; }
     try { this.tts = new TtsService(); } catch(e) { console.error('TtsService hatası', e); this.tts = { speak:()=>{}, getVoices:()=>[], setVoice:()=>{}, setEnabled:()=>{} }; }
@@ -377,6 +379,10 @@ export class UltimateTradingCommandCenter {
     };
     STATE.orderBook = this.orderBook;
     this.heatmapManager.draw(this.orderBook, this.marketData.price);
+    try {
+      const tickSize = this.symbolInfo?.tickSize || STATE.symbolInfo?.tickSize || 0.01;
+      this.tieredOrderBook.render(this.orderBook, tickSize);
+    } catch(_){}
     if (this.settings.features.enableSpoofDetection) this.spoofDetector.trackOrderBook(this.orderBook);
     for (const key of this.strategyKeys) {
       try { this.strategies[key]?.analyzeOrderBook?.(this.orderBook); }
