@@ -36,8 +36,8 @@ export class BinanceStream {
     this.manualClose = false;
     this.isRunning = false;
 
-    // Watchdog
-    this.lastSeen = { ticker: 0, depth: 0, kline: 0, aggTrade: 0, any: 0 };
+    // Watchdog — Faz D fix: forceOrder/markPrice ayrı slotlarda, aggTrade/ticker'ı maskelemesin
+    this.lastSeen = { ticker: 0, depth: 0, kline: 0, aggTrade: 0, forceOrder: 0, markPrice: 0, any: 0 };
     this.watchdogTimer = null;
   }
 
@@ -172,7 +172,7 @@ export class BinanceStream {
       this.lastSeen.aggTrade = now;
       this.handlers.onAggTrade?.(data);
     } else if (at.startsWith('forceOrder') || stream.includes('forceOrder')) {
-      this.lastSeen.aggTrade = now;
+      this.lastSeen.forceOrder = now;
       // Binance !forceOrder@arr formatı: {o: {s, S, p, q, ...}} veya {s, S, p, q}
       const order = data.o || data;
       const forceOrder = {
@@ -184,12 +184,12 @@ export class BinanceStream {
         ts: order.T || Date.now(),
         raw: data
       };
-      // Sadece ilgili sembol için filtrele (all-arr ise)
-      if (forceOrder.symbol === this.symbol || stream === '!forceOrder@arr') {
+      // FIX v3 #1: sadece ilgili sembolün likidasyonunu geçir (önceki || stream === '!forceOrder@arr' her zaman true idi)
+      if (forceOrder.symbol === this.symbol) {
         this.handlers.onForceOrder?.(forceOrder);
       }
     } else if (at.startsWith('markPrice') || stream.includes('markPrice')) {
-      this.lastSeen.ticker = now;
+      this.lastSeen.markPrice = now;
       this.handlers.onMarkPrice?.(data);
     } else {
       // Bilinmeyen stream — yine de logla (sessiz kesilmeyi fark etmek için)
@@ -256,6 +256,8 @@ export class BinanceStream {
       const silent = [];
       for (const [key, ts] of Object.entries(this.lastSeen)) {
         if (key === 'any') continue;
+        // forceOrder nadir bir stream (likidasyon sadece volatil anlarda) → 10dk sessizliği normal, watchdog'u tetiklemesin
+        if (key === 'forceOrder') continue;
         if (ts === 0) continue; // henüz hiç gelmediyse ilk bağlantıda sessiz sayma (ilk 90sn tolerans)
         if (now - ts > staleMs) silent.push(`${key} ${Math.round((now - ts) / 1000)}s sessiz`);
       }
@@ -273,7 +275,7 @@ export class BinanceStream {
         // Sessiz kalan soketi zorla yenile
         // Hangi soket hangi stream'i taşıyorsa ona göre karar ver
         const needPublic = silent.some(s => s.startsWith('depth'));
-        const needMarket = silent.some(s => s.startsWith('ticker') || s.startsWith('kline') || s.startsWith('aggTrade'));
+        const needMarket = silent.some(s => s.startsWith('ticker') || s.startsWith('kline') || s.startsWith('aggTrade') || s.startsWith('markPrice'));
 
         if (needPublic && this.publicWs) {
           Logger.warn('BinanceStream', 'Watchdog → Public WS yeniden bağlanıyor');

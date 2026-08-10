@@ -228,16 +228,21 @@ npm test
 
 ## 🗺️ Yol Haritası
 
-- [x] **Faz A — Kırık olanı onar** (12 patch ✅ bu sürüm)
-- [x] **Faz B — Geri besleme döngülerini kapat** (6 entegrasyon ✅ bu sürüm)
-- [ ] **Faz C — Görünürlük:** Strateji bazlı performans paneli (win-rate grafik), MTF özet UI (`5m:↑ 15m:↑ 1h:↓ 4h:→`), sinyal filtre/export (CSV/JSON), shadow near-miss logu
-- [ ] **Faz D — Büyük özellikler:** Çoklu borsa arayüzü (`ExchangeManager` → `BinanceStream`/`BybitStream`...), çoklu sembol tarama/watchlist, backtest/walk-forward, bulut senkron (Firebase REST)
+- [x] **Faz A — Kırık olanı onar** (12 patch ✅ v2.1-patched)
+- [x] **Faz B — Geri besleme döngülerini kapat** (6 entegrasyon ✅ v2.1-patched)
+- [x] **P0 — Binance Dual WS Migration** (public/market split + Watchdog ✅ f1b1856)
+- [x] **Faz C — Görünürlük** (strateji performans paneli ✅, MTF özet + otomatik kehanet ✅, sinyal filtre/export ✅ `07f154b`)
+- [x] **Faz D (kısmi) — CVD + gerçek forceOrder + borsa-agnostik iskelet** (CVD ✅, `!forceOrder@arr` gerçek feed ✅, `BybitStream`/`OKXStream` stub + `StreamClass` enjeksiyonu ✅ `3e7687b`)
+- [ ] **Faz D (kalan) — Borsa seçici UI + REST adapter** (exchange-select, `fetchInitialData` borsa-duyarlı, Bybit/OKX gerçek WS)
+- [ ] **Faz D — Çoklu sembol WatchlistManager** (hafif ön-skor tarama, tam motor sadece seçili sembolde)
+- [ ] **Faz D — BacktestEngine** (TradingCore ayrımı + geçmiş mumla walk-forward, Bayes prior'a aktarım)
+- [ ] **Faz D — CloudSyncManager** (Firebase REST, StorageBridge write-behind, opt-in)
 
 ---
 
 ## 📄 Dokümanlar
 
-- `PLAN.md` — mimari kararlar (barva35 tek referans)
+- `docs/ARCHITECTURE.md` — mimari kararlar (barva35 tek referans) — not: `PLAN.md` silindi (`051671a`), mimari artık `docs/` altında
 - `docs/ARCHITECTURE.md` — veri akışı detayı
 - `docs/API.md` — modül API referansı
 

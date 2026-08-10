@@ -822,7 +822,7 @@ export class UltimateTradingCommandCenter {
     const now = Date.now();
     if (this._lastAutoProphecy && now - this._lastAutoProphecy < 300000) return; // 5dk throttle
     if (allUp || allDown) {
-      const prop = allUp ? 'AGGRESSIVE' : 'AGGRESSIVE'; // her iki yönde de güçlü teyit → saldırgan
+      const prop = 'AGGRESSIVE'; // her iki yönde de güçlü teyit → saldırgan (4/4 up veya 4/4 down)
       // Eğer 4/4 çelişkili olsaydı DEFENSIVE olacaktı, ama hepsi aynı yönde zaten teyit
       // Çelişkili durum için ayrı kontrol: 2 up 2 down
       // Burada sadece teyit durumu
