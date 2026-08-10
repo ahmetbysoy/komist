@@ -228,6 +228,23 @@
           <div class="panel-title">Aktif Stratejiler</div>
           <div id="modal-strategy-toggles" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px;"></div>
         </div>
+        <!-- Yapay Zeka Hafızası: İtibar Kartı (Madde 4) -->
+        <div class="settings-group" style="grid-column: 1 / -1;">
+          <div class="panel-title">🧠 İtibar Kartı</div>
+          <div id="ai-reputation-card" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; padding:10px; background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px;">
+            <div style="text-align:center;">
+              <div style="font-size:11px; color:var(--text-secondary);">İtibar Puanı</div>
+              <div id="ai-rep-score" style="font-size:28px; font-weight:800; color:var(--primary);">100</div>
+              <div id="ai-rep-level" style="font-size:11px; color:var(--text-secondary);">Acemi Tacir</div>
+            </div>
+            <div style="text-align:center;">
+              <div style="font-size:11px; color:var(--text-secondary);">Son Form (10)</div>
+              <div id="ai-rep-history" style="display:flex; gap:3px; justify-content:center; margin-top:6px; flex-wrap:wrap;"></div>
+              <div id="ai-rep-delta" style="font-size:10px; color:var(--text-secondary); margin-top:4px;"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Faz C: Strateji Performansı (Canlı Bayes) -->
         <div class="settings-group" style="grid-column: 1 / -1;">
           <div class="panel-title">📊 Strateji Performansı (Canlı Bayes)</div>
@@ -242,6 +259,18 @@
           <div style="margin-top:6px; display:flex; gap:6px; justify-content:flex-end;">
             <button id="export-strategy-csv-btn" class="btn btn-tiny">CSV İndir</button>
             <button id="refresh-strategy-perf-btn" class="btn btn-tiny">⟳ Yenile</button>
+          </div>
+        </div>
+        <!-- Yapay Zeka Hafızası: Strateji Karnesi (paternExperiences) -->
+        <div class="settings-group" style="grid-column: 1 / -1;">
+          <div class="panel-title">📚 Strateji Karnesi (Patern Deneyimleri)</div>
+          <div class="data-table-container" style="max-height: 300px; overflow-y: auto;">
+            <table class="data-table">
+              <thead>
+                <tr><th>Patern</th><th>Toplam</th><th>Başarı</th><th>Başarısız</th><th>Nötr</th><th>WR%</th><th>Son Görülme</th></tr>
+              </thead>
+              <tbody id="patern-experiences-body"><tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Henüz deneyim yok — sinyal üretildikçe dolacak</td></tr></tbody>
+            </table>
           </div>
         </div>
         <!-- Faz C: Sinyal Geçmişi + Filtre + Export -->

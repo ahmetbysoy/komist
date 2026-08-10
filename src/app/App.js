@@ -108,6 +108,15 @@ export class UltimateTradingCommandCenter {
     this.strategyStats = this.initDefaultStrategyStats();
     this.shadowProposals = [];
     this.marketRegime = 'unknown';
+    // Yapay Zeka Hafızası (senin Madde 1)
+    this.tradingSystemMemory = {
+      paternExperiences: new Map(),
+      reputation: { score: 100, level: 'Acemi Tacir', history: [], lastUpdate: Date.now() },
+      completedSignals: []
+    };
+    this.MAX_MEMORY_PENDING_SIGNALS = 100;
+    this.MAX_MEMORY_REPUTATION_HISTORY = 50;
+    this.MAX_COMPLETED_SIGNALS = 100;
     // REMOVED: this.positions = [] -> ölü sistem (Faz A #2). Pozisyon takibi signals üzerinden (checkAutoCloseSignals) yapılıyor.
     // PositionManager.manageOpenPositions() artık no-op / deprecated. Geriye dönük uyum için boş dizi bırakma, tamamen kaldırıldı.
 
@@ -189,6 +198,9 @@ export class UltimateTradingCommandCenter {
     const persistedStats = this.storage.getJsonSync('utc_strategy_stats');
     if (persistedStats) this.strategyStats = persistedStats;
 
+    // Yapay Zeka Hafızası yükle
+    this.loadTradingSystemMemory();
+
     // Kalıcı sinyal/stats/pending geri yükle + STATE senkronizasyonu (Faz A #1 + Yapay Zeka Hafızası)
     this.signals = this.storage.getJsonSync('utc_signals') || [];
     this.pendingSignals = this.storage.getJsonSync('utc_pending_signals') || this.pendingSignals || [];
@@ -222,6 +234,9 @@ export class UltimateTradingCommandCenter {
     this.applyStrategyParamOverrides();
 
     document.body.classList.add('header-collapsed');
+    // Yapay Zeka Hafızası UI ilk yükleme
+    try { this.ui.updateReputationCard(); } catch(_){}
+    try { this.ui.renderPaternExperiences(); } catch(_){}
     this.effects.start();
     this.updateSession();
     this.sessionInterval = setInterval(() => this.updateSession(), 60000);
@@ -485,29 +500,73 @@ export class UltimateTradingCommandCenter {
           sig.evaluationResult = result;
           sig.evaluationPoints.t60 = t60;
 
-          // Hafızayı güncelle (paternExperiences benzeri: strategyStats + panteon)
-          const paternKey = sig.reason || sig.contributors?.[0]?.strategy || 'unknown';
-          // strategyStats'e yaz (zaten var, ama t60 bazlı ek kredi)
-          // Reputation güncelle
+          // Hafızanın Güncellenmesi (Madde 3 - 4. Adım) — detaylı
+          const paternKey = sig.paternSignature || sig.reason || sig.contributors?.[0]?.strategy || 'unknown';
+          // paternExperiences Map güncelle
+          let exp = this.tradingSystemMemory.paternExperiences.get(paternKey);
+          if (!exp) {
+            exp = { totalPredictions: 0, successCount: 0, failureCount: 0, neutralCount: 0, successRate: 0, firstSeen: Date.now(), lastSeen: Date.now() };
+          }
+          exp.totalPredictions += 1;
+          if (result === 'success') exp.successCount += 1;
+          else if (result === 'failure') exp.failureCount += 1;
+          else exp.neutralCount += 1;
+          exp.successRate = exp.totalPredictions > 0 ? (exp.successCount / exp.totalPredictions) * 100 : 0;
+          exp.lastSeen = Date.now();
+          if (!exp.firstSeen) exp.firstSeen = sig.timestamp;
+          this.tradingSystemMemory.paternExperiences.set(paternKey, exp);
+
+          // reputation.score ve history güncelle (+5 / -10 / -1)
           const repDelta = result === 'success' ? 5 : result === 'failure' ? -10 : -1;
-          // Panteon reputation'ına doğrudan ekle (mevcut sistemle uyumlu)
-          // Not: mevcut sistemde panteon sadece TP/SL ile güncelleniyor, burada neutral için de -1
-          if (this.panteon && result !== 'neutral') {
-            // Zaten updateSignalResult içinde güncelleniyor, burada ek bir şey yapma
+          this.tradingSystemMemory.reputation.score = Math.max(0, Math.min(200, (this.tradingSystemMemory.reputation.score || 100) + repDelta));
+          this.tradingSystemMemory.reputation.history.push({ time: Date.now(), score: this.tradingSystemMemory.reputation.score, delta: repDelta, result, patern: paternKey });
+          if (this.tradingSystemMemory.reputation.history.length > this.MAX_MEMORY_REPUTATION_HISTORY) {
+            this.tradingSystemMemory.reputation.history.splice(0, this.tradingSystemMemory.reputation.history.length - this.MAX_MEMORY_REPUTATION_HISTORY);
+          }
+          // reputation level güncelle
+          const score = this.tradingSystemMemory.reputation.score;
+          if (score >= 150) this.tradingSystemMemory.reputation.level = 'Efsane';
+          else if (score >= 120) this.tradingSystemMemory.reputation.level = 'Usta';
+          else if (score >= 100) this.tradingSystemMemory.reputation.level = 'Acemi Tacir';
+          else if (score >= 70) this.tradingSystemMemory.reputation.level = 'Çaylak';
+          else this.tradingSystemMemory.reputation.level = 'Acemi';
+
+          // completedSignals arşivi
+          this.tradingSystemMemory.completedSignals.push({
+            id: sig.id,
+            symbol: sig.symbol,
+            type: sig.direction,
+            paternSignature: paternKey,
+            entryPrice: entry,
+            exitPrice: t60,
+            entryTimestamp: sig.timestamp,
+            exitTimestamp: Date.now(),
+            profitPercentage: changePct,
+            result
+          });
+          if (this.tradingSystemMemory.completedSignals.length > this.MAX_COMPLETED_SIGNALS) {
+            this.tradingSystemMemory.completedSignals.shift();
           }
 
-          // pending'den çıkar, completed'a ekle (bizde completedSignals yok, signals içinde status güncelleniyor)
+          // Panteon reputation'ına da yansıt (mevcut sistemle uyumlu, sadece success/failure için)
+          // Not: neutral için panteon'a dokunma
+
+          // pending'den çıkar, completed'a ekle
           this.pendingSignals = this.pendingSignals.filter(s => s.id !== sig.id);
-          // signals içindeki aynı id'li pending'i de güncelle
           const idx = this.signals.findIndex(s => s.id === sig.id);
           if (idx !== -1) this.signals[idx] = sig;
 
           this.saveData('utc_signals', this.signals);
           this.saveData('utc_pending_signals', this.pendingSignals);
+          this.saveTradingSystemMemory();
           STATE.signals = this.signals;
           STATE.pendingSignals = this.pendingSignals;
+          // Arayüzde canlı yansıma (Madde 4)
+          try { this.ui.updateReputationCard(); } catch(_){}
+          try { this.ui.renderPaternExperiences(); } catch(_){}
+          try { this.ui.renderStrategyPerformance(); } catch(_){}
 
-          Logger.info('Eval', `Sinyal ${sig.id.slice(0,8)} t60=${t60} entry=${entry} change=${changePct.toFixed(2)}% → ${result}`);
+          Logger.info('Eval', `Sinyal ${sig.id.slice(0,8)} t60=${t60} entry=${entry} change=${changePct.toFixed(2)}% → ${result} | rep:${this.tradingSystemMemory.reputation.score} patern:${paternKey} WR:${exp.successRate.toFixed(1)}%`);
         }
       } catch (e) {
         Logger.debug('Eval', `evaluatePendingSignals hatası ${sig.id}:`, e.message);
@@ -713,18 +772,32 @@ export class UltimateTradingCommandCenter {
     this.ui.renderSignals(this.signals);
 
     let sizeText = signal.recommendedSize ? ` | Boyut: ${signal.recommendedSize}` : '';
-    this.notify.show(
-      `AKTİF SİNYAL: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} | Skor: ${signal.score.toFixed(1)}${sizeText}`,
-      signal.direction === 'buy' ? 'success' : 'danger'
-    );
 
-    // Efekt + ses
+    // Efekt + ses — Yapay Zeka Hafızası: patern başarı oranına göre kişiselleştirilmiş açıklama
     this.effects.emit(signal.direction === 'buy' ? 'buy' : 'sell');
+    let paternInfo = '';
+    try {
+      const paternKey = signal.paternSignature || signal.contributors?.map(c=>c.strategy).sort().join('+') || '';
+      const exp = this.tradingSystemMemory?.paternExperiences?.get(paternKey);
+      if (exp && exp.totalPredictions >= 5) {
+        paternInfo = ` | Patern WR:${exp.successRate.toFixed(1)}% (${exp.successCount}/${exp.totalPredictions})`;
+        // Başarı oranı yüksekse daha güvenli, düşükse uyarı ekle
+        if (exp.successRate >= 70) paternInfo += ' ✅';
+        else if (exp.successRate < 45) paternInfo += ' ⚠️';
+      } else if (paternKey) {
+        paternInfo = ' | Yeni patern — öğreniliyor';
+      }
+    } catch(_){}
     const message = this.getRandomMessage(signal.direction === 'buy' ? 'buy' : 'sell', {
       Sembol: signal.symbol.replace('USDT', ''),
       Skor: signal.score.toFixed(1)
     });
-    this.tts.speak(message);
+    // Bildirimde patern bilgisini de göster
+    const fullNotify = `AKTİF SİNYAL: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} | Skor: ${signal.score.toFixed(1)}${sizeText}${paternInfo}`;
+    // Zaten yukarıda notify.show yapıldı, ama patern bilgisi eklemek için tekrar göster (veya ilkini değiştir)
+    // İlk notify'yi patern bilgisiyle güncelle
+    this.notify.show(fullNotify, signal.direction === 'buy' ? 'success' : 'danger');
+    this.tts.speak(message + (paternInfo ? ` Patern deneyimi: ${paternInfo}` : ''));
 
     if (signal.score >= 8 && !this.combatModeActive) this.activateCombatMode();
 
@@ -1014,7 +1087,11 @@ export class UltimateTradingCommandCenter {
     // Faz C: Strateji performansını periyodik yenile (modal açıksa)
     try {
       const overlay = document.getElementById('settings-modal-overlay');
-      if (overlay?.classList.contains('visible')) this.ui.renderStrategyPerformance();
+      if (overlay?.classList.contains('visible')) {
+        this.ui.renderStrategyPerformance();
+        this.ui.updateReputationCard();
+        this.ui.renderPaternExperiences();
+      }
     } catch(_){}
   }
 
@@ -1237,6 +1314,31 @@ export class UltimateTradingCommandCenter {
     this.saveData('pantheon_state', this.panteon.serialize());
   }
 
+  saveTradingSystemMemory() {
+    try {
+      const toSave = {
+        paternExperiences: Array.from(this.tradingSystemMemory.paternExperiences.entries()),
+        reputation: this.tradingSystemMemory.reputation,
+        completedSignals: this.tradingSystemMemory.completedSignals
+      };
+      this.saveData('utc_trading_memory', toSave);
+      // Ayrıca reputation.history ve paternExperiences için limit kontrolü zaten yapıldı
+    } catch(e) { Logger.debug('Memory', 'saveTradingSystemMemory hatası', e.message); }
+  }
+
+  loadTradingSystemMemory() {
+    try {
+      const loaded = this.storage.getJsonSync('utc_trading_memory');
+      if (loaded) {
+        if (loaded.paternExperiences) {
+          this.tradingSystemMemory.paternExperiences = new Map(loaded.paternExperiences);
+        }
+        if (loaded.reputation) this.tradingSystemMemory.reputation = loaded.reputation;
+        if (loaded.completedSignals) this.tradingSystemMemory.completedSignals = loaded.completedSignals;
+      }
+    } catch(e) { Logger.debug('Memory', 'loadTradingSystemMemory hatası', e.message); }
+  }
+
   updatePanteonUI() {
     this.ui.updatePanteon(this.panteon.getElciler());
   }
@@ -1327,6 +1429,8 @@ export class UltimateTradingCommandCenter {
     this._populateModal();
     // Faz C: Modal açılınca performans tablosunu doldur
     try { this.ui.renderStrategyPerformance(); } catch(_){}
+    try { this.ui.updateReputationCard(); } catch(_){}
+    try { this.ui.renderPaternExperiences(); } catch(_){}
     try { this.ui.renderSignals(this.signals); } catch(_){}
   }
 

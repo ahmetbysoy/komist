@@ -356,6 +356,60 @@ export class UIController {
     }
   }
 
+  updateReputationCard() {
+    const mem = this.bot.tradingSystemMemory;
+    if (!mem) return;
+    const scoreEl = $('ai-rep-score');
+    const levelEl = $('ai-rep-level');
+    const historyEl = $('ai-rep-history');
+    const deltaEl = $('ai-rep-delta');
+    if (scoreEl) scoreEl.textContent = mem.reputation.score;
+    if (levelEl) {
+      levelEl.textContent = mem.reputation.level;
+      const colors = { 'Efsane': 'var(--positive)', 'Usta': '#8b5cf6', 'Acemi Tacir': 'var(--primary)', 'Çaylak': 'var(--neutral)', 'Acemi': 'var(--negative)' };
+      levelEl.style.color = colors[mem.reputation.level] || 'var(--text-secondary)';
+    }
+    if (historyEl) {
+      const hist = mem.reputation.history.slice(-10);
+      historyEl.innerHTML = hist.map(h => {
+        const col = h.delta > 0 ? 'var(--positive)' : h.delta < 0 ? 'var(--negative)' : 'var(--neutral)';
+        const icon = h.delta > 0 ? '▲' : h.delta < 0 ? '▼' : '●';
+        return `<span style="color:${col}; font-size:10px;" title="${new Date(h.time).toLocaleTimeString()} ${h.delta>0?'+'+h.delta:h.delta} ${h.result}">${icon}</span>`;
+      }).join('') || '<span style="color:var(--text-secondary); font-size:9px;">Henüz yok</span>';
+    }
+    if (deltaEl) {
+      const last = mem.reputation.history[mem.reputation.history.length-1];
+      if (last) deltaEl.textContent = `Son: ${last.delta>0?'+'+last.delta:last.delta} (${last.result})`;
+      else deltaEl.textContent = '';
+    }
+  }
+
+  renderPaternExperiences() {
+    const tbody = $('patern-experiences-body');
+    if (!tbody) return;
+    const mem = this.bot.tradingSystemMemory;
+    if (!mem || !mem.paternExperiences || mem.paternExperiences.size === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Henüz deneyim yok — sinyal üretildikçe dolacak</td></tr>';
+      return;
+    }
+    const rows = Array.from(mem.paternExperiences.entries())
+      .map(([patern, exp]) => ({ patern, ...exp }))
+      .sort((a,b) => b.successRate - a.successRate);
+    tbody.innerHTML = rows.map(exp => {
+      const wrColor = exp.successRate >= 60 ? 'var(--positive)' : exp.successRate >= 45 ? 'var(--neutral)' : 'var(--negative)';
+      const lastSeen = exp.lastSeen ? new Date(exp.lastSeen).toLocaleTimeString('tr-TR') : '-';
+      return `<tr>
+        <td style="font-size:9px; max-width:180px; overflow:hidden; text-overflow:ellipsis;" title="${exp.patern}">${exp.patern.slice(0,30)}</td>
+        <td>${exp.totalPredictions}</td>
+        <td style="color:var(--positive)">${exp.successCount}</td>
+        <td style="color:var(--negative)">${exp.failureCount}</td>
+        <td>${exp.neutralCount}</td>
+        <td style="color:${wrColor}; font-weight:700;">${exp.successRate.toFixed(1)}%</td>
+        <td style="font-size:9px;">${lastSeen}</td>
+      </tr>`;
+    }).join('');
+  }
+
   exportStrategyCSV() {
     const stats = this.bot.strategyStats || {};
     const keys = this.bot.strategyKeys || Object.keys(stats);
@@ -412,7 +466,11 @@ export class UIController {
       const overlay = $('settings-modal-overlay');
       if (overlay?.classList.contains('visible')) {
         // Biraz gecikmeli yenile (modal performans)
-        setTimeout(() => this.renderStrategyPerformance(), 100);
+        setTimeout(() => {
+          this.renderStrategyPerformance();
+          this.updateReputationCard();
+          this.renderPaternExperiences();
+        }, 100);
       }
     }
 
