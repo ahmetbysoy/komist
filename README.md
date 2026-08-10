@@ -33,7 +33,7 @@
 Tek bir mobil terminalde aynı anda **20 teknik strateji** çalışır, **Confluence Engine** bunları zaman çürümesi + Bayes ağırlık + MTF teyidi + gating ile birleştirir, **Panteon (Mitolojik İtibar Sistemi)** ve **Risk Katmanı (Araf Protokolü)** süzgecinden geçirip **pending → aktif → TP/SL** yaşam döngüsüyle kullanıcıya sunar.
 
 ```
-Binance WS (ticker/depth/kline/aggTrade) → ExchangeManager → UltimateTradingCommandCenter
+Binance Dual WS (public:depth / market:ticker/kline/aggTrade) → ExchangeManager → UltimateTradingCommandCenter
   → 20 Strateji.propose() → ConfluenceEngine → generateFinalSignal (pending/aktif)
     → PositionManager.calculateLevels (ATRxRR) → checkAutoCloseSignals
       → Panteon itibar + Bayes stats + CUSUM + RiskGuardian (kill-switch)
@@ -179,16 +179,23 @@ cd android && ./gradlew assembleDebug
 
 ---
 
-## 🔑 Veri Kaynakları (Binance Futures)
+## 🔑 Veri Kaynakları (Binance Futures) — P0 Dual Routed WS (2026-04-23 Migration)
 
-| Veri | Stream / Endpoint |
-|------|-------------------|
-| Fiyat / 24s değişim / hacim | WS `@ticker` (ZebaniFilter'den geçer) |
-| Emir defteri (20 seviye) | WS `@depth20@100ms` → heatmap + spoof |
-| Mumlar | WS `@kline_{tf}` + REST `/fapi/v1/klines?limit=500` |
-| Trade'ler | WS `@aggTrade` → `processTrade` |
-| MTF teyidi | REST klines (5m/15m/1h/4h via `MultiTimeframeManager`) |
-| Fallback | `MockDataGenerator` (random walk) |
+> **2026-04-23'te Binance legacy tek URL (`wss://fstream.binance.com/stream`) kaldırıldı.** Artık 2 routed endpoint var:
+> - `wss://fstream.binance.com/public` → depth / bookTicker (yüksek frekans)
+> - `wss://fstream.binance.com/market` → ticker / kline / aggTrade / forceOrder / markPrice
+> Kod `BinanceStream` içinde **2 paralel WebSocket + Watchdog** ile yönetir. Eski tek URL artık sadece `/public` taşır.
+
+| Veri | Stream / Endpoint | WS |
+|------|-------------------|----|
+| Fiyat / 24s değişim / hacim | `@ticker` (ZebaniFilter'den geçer) | **market** |
+| Emir defteri (20 seviye) | `@depth20@100ms` → heatmap + spoof | **public** |
+| Mumlar | `@kline_{tf}` + REST `/fapi/v1/klines?limit=500` | **market** |
+| Trade'ler | `@aggTrade` (ham `@trade` de destekleniyor) → `processTrade` | **market** |
+| Likidasyon (yakında) | `@forceOrder` → `LiquidationCascadeStrategy` (Faz D) | **market** |
+| MTF teyidi | REST klines (5m/15m/1h/4h via `MultiTimeframeManager`) | REST |
+| Fallback | `MockDataGenerator` (random walk) | mock |
+| Sağlık | `ExchangeManager.getHealth()` + Watchdog (60s sessiz → uyarı + reconnect) | — |
 
 ---
 
