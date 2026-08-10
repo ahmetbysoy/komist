@@ -53,29 +53,55 @@ export class HeatmapManager {
     const decimals = this._getDecimals(symbolPrice);
 
     levels.forEach(([price, qty], i) => {
-      const intensity = Math.min(Math.sqrt(qty / maxQty), 1.0);
+      const intensity = Math.min(Math.pow(qty / maxQty, 0.7), 1.0);
       const barWidth = w * intensity;
       const y = side === 'asks' ? i * heightPerLevel : half + i * heightPerLevel;
 
-      this.ctx.fillStyle = `rgba(${baseColor}, ${(intensity * 0.6 + 0.1).toFixed(2)})`;
-      this.ctx.fillRect(0, y, barWidth, heightPerLevel);
+      // Premium gradient: daha akıcı renk geçişi
+      const alpha = (intensity * 0.7 + 0.15).toFixed(2);
+      const gradient = this.ctx.createLinearGradient(0, y, barWidth, y);
+      gradient.addColorStop(0, `rgba(${baseColor}, ${alpha})`);
+      gradient.addColorStop(1, `rgba(${baseColor}, ${(alpha*0.6).toFixed(2)})`);
+      this.ctx.fillStyle = gradient;
+      // Yuvarlatılmış bar
+      this.ctx.beginPath();
+      this.ctx.roundRect(0, y+1, barWidth, heightPerLevel-2, 2);
+      this.ctx.fill();
 
-      // Etiket
-      this.ctx.fillStyle = intensity > 0.5 ? 'rgba(255,255,255,0.95)' : 'rgba(200,200,200,0.75)';
-      this.ctx.font = '10px "Roboto Mono", monospace';
-      this.ctx.fillText(`${qty.toFixed(4)} @ ${price.toFixed(decimals)}`, 6, y + heightPerLevel / 2 + 3);
+      // Etiket — yoğunluk ve mobil optimizasyon
+      if (heightPerLevel > 8) {
+        this.ctx.fillStyle = intensity > 0.5 ? 'rgba(255,255,255,0.95)' : 'rgba(220,220,220,0.85)';
+        this.ctx.font = '10px "Roboto Mono", monospace';
+        // Fiyat değişimini merkeze uzaklıkla renklendir (derinlik görünümü)
+        const distFromMid = Math.abs(price - symbolPrice) / symbolPrice;
+        if (distFromMid > 0.01) this.ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        this.ctx.fillText(`${qty.toFixed(3)} @ ${price.toFixed(decimals)}`, 8, y + heightPerLevel / 2 + 3);
+      }
     });
 
-    // Merkez fiyat çizgisi
+    // Merkez fiyat çizgisi + fiyat etiketi
     if (symbolPrice) {
-      this.ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      this.ctx.setLineDash([3, 3]);
+      this.ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      this.ctx.setLineDash([4, 4]);
+      this.ctx.lineWidth = 1;
       this.ctx.beginPath();
       this.ctx.moveTo(0, half);
       this.ctx.lineTo(w, half);
       this.ctx.stroke();
       this.ctx.setLineDash([]);
+      // Fiyat etiketi (premium)
+      const priceText = symbolPrice.toFixed(decimals);
+      this.ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      this.ctx.fillRect(w - 70, half - 8, 70, 16);
+      this.ctx.fillStyle = '#0d1117';
+      this.ctx.font = 'bold 10px "Roboto Mono", monospace';
+      this.ctx.fillText(priceText, w - 65, half + 3);
     }
+    // Zaman ekseni işaretleyicileri (basit)
+    this.ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    this.ctx.font = '8px "Roboto Mono", monospace';
+    const now = new Date();
+    this.ctx.fillText(now.toLocaleTimeString('tr-TR').slice(0,5), 4, h - 4);
   }
 
   _getDecimals(price) {

@@ -22,12 +22,25 @@ export class NotificationService {
     const el = document.createElement('div');
     el.className = `notification ${type}`;
     el.style.borderLeftColor = cfg.color;
-    el.innerHTML = `<span class="notif-icon">${cfg.icon}</span><span class="notif-text">${message}</span>`;
+    el.style.backdropFilter = 'blur(12px)';
+    el.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)';
+    el.innerHTML = `<span class="notif-icon" style="font-size:14px;">${cfg.icon}</span><span class="notif-text" style="font-weight:500;">${message}</span>`;
     this.container.appendChild(el);
+    // Haptic feedback (BÖLÜM 3: Genel Kullanım Kolaylığı)
+    try {
+      if (navigator.vibrate) {
+        if (type === 'success') navigator.vibrate(30);
+        else if (type === 'danger') navigator.vibrate([30,50,30]);
+        else if (type === 'warning') navigator.vibrate(50);
+      }
+    } catch(_){}
+    // Görsel geri bildirim animasyonu
+    el.animate([{ transform: 'translateX(-100%)', opacity: 0 }, { transform: 'translateX(0)', opacity: 1 }], { duration: 300, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
 
     setTimeout(() => {
       el.classList.add('fade-out');
-      setTimeout(() => el.remove(), 400);
+      el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400 }).onfinish = () => el.remove();
+      setTimeout(() => { try{ el.remove(); }catch(_){} }, 450);
     }, timeout);
   }
 
