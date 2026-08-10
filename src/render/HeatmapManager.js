@@ -50,7 +50,16 @@ export class HeatmapManager {
     const half = h / 2;
     const heightPerLevel = half / Math.max(levels.length, 1);
     const baseColor = side === 'asks' ? '239,68,68' : '40,167,69';
-    const decimals = this._getDecimals(symbolPrice);
+    // tickSize hassasiyeti ile ondalık hesaplama
+    let decimals = this._getDecimals(symbolPrice);
+    try {
+      const tickSize = (typeof STATE !== 'undefined' && STATE.symbolInfo?.tickSize) || null;
+      if (tickSize) {
+        const s = tickSize.toString();
+        if (s.includes('e-')) decimals = parseInt(s.split('e-')[1]);
+        else if (s.includes('.')) decimals = s.split('.')[1].replace(/0+$/, '').length || decimals;
+      }
+    } catch(_){}
 
     levels.forEach(([price, qty], i) => {
       const intensity = Math.min(Math.pow(qty / maxQty, 0.7), 1.0);

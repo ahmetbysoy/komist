@@ -22,9 +22,13 @@ export const stddev = (arr) => {
   return Math.sqrt(arr.reduce((s, x) => s + (x - m) ** 2, 0) / arr.length);
 };
 
-/** Fiyat formatı — büyüklüğe göre dinamik ondalık (barva35 formatPrice) */
-export function formatPrice(price) {
+/** Fiyat formatı — büyüklüğe göre dinamik ondalık (barva35 formatPrice) — tickSize hassasiyeti ile */
+export function formatPrice(price, tickSize = null) {
   if (!isFinite(price)) return '-';
+  if (tickSize && isFinite(tickSize) && tickSize > 0) {
+    const prec = getPrecisionFromTickSize(tickSize);
+    return price.toFixed(prec);
+  }
   const abs = Math.abs(price);
   if (abs >= 1000) return price.toFixed(2);
   if (abs >= 1) return price.toFixed(2);
@@ -42,12 +46,34 @@ export function formatVolume(v) {
   return v.toFixed(0);
 }
 
-/** Sembole göre dinamik ondalık basamak sayısı (barva35 getDecimalPlaces) */
-export function getDecimalPlaces(symbol) {
+/** Sembole göre dinamik ondalık basamak sayısı (barva35 getDecimalPlaces) — tickSize hassasiyeti ile */
+export function getDecimalPlaces(symbol, tickSize = null) {
+  // tickSize varsa ona göre hesapla (en doğru)
+  if (tickSize && isFinite(tickSize) && tickSize > 0) {
+    const s = tickSize.toString();
+    if (s.includes('e-')) {
+      const exp = parseInt(s.split('e-')[1]);
+      return exp;
+    }
+    if (s.includes('.')) return s.split('.')[1].replace(/0+$/, '').length || 2;
+    return 2;
+  }
   const s = (symbol || '').toUpperCase();
   if (s.includes('1000')) return 2;
   if (s.includes('BTC')) return 1;
   if (s.includes('USDT') || s.includes('USDC')) return 2;
+  return 2;
+}
+
+/** TickSize'dan fiyat hassasiyeti (sembol bilgisiyle) */
+export function getPrecisionFromTickSize(tickSize) {
+  if (!tickSize || !isFinite(tickSize) || tickSize <= 0) return 2;
+  const s = tickSize.toString();
+  if (s.includes('e-')) return parseInt(s.split('e-')[1]);
+  if (s.includes('.')) {
+    const dec = s.split('.')[1].replace(/0+$/, '');
+    return dec.length || 2;
+  }
   return 2;
 }
 

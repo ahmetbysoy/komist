@@ -91,6 +91,7 @@ export class UltimateTradingCommandCenter {
 
     // ── Piyasa verisi ──────────────────────────────────
     this.marketData = { price: 0, change24h: 0, volume24h: 0, symbol: this.currentSymbol, btcPrice: 70000 };
+    this.symbolInfo = { pricePrecision: 2, quantityPrecision: 6, tickSize: 0.01, stepSize: 0.001, baseAsset: 'BTC', quoteAsset: 'USDT', status: 'TRADING' };
     this.orderBook = { bids: [], asks: [], lastUpdateId: null };
     this.candles = [];
     this.indicators = { rsi: [], atr: null, sma20: null, sma50: null, volSma20: null, vwap: null, adx: null, bbands: null };
@@ -194,8 +195,12 @@ export class UltimateTradingCommandCenter {
     STATE.symbol = this.currentSymbol;
     STATE.timeframe = this.currentTimeframe;
     STATE.exchange = this.currentExchange;
+    STATE.symbolInfo = this.symbolInfo;
     // UI'daki borsa seçiciyi güncelle
     try { const sel = document.getElementById('exchange-select'); if (sel) sel.value = this.currentExchange; } catch(_){}
+
+    // Sembol bilgisini al (tickSize hassasiyeti)
+    try { await this.fetchSymbolInfo(this.currentSymbol); } catch(_){}
 
     // strategyStats kalıcılığı (Faz A #8)
     const persistedStats = this.storage.getJsonSync('utc_strategy_stats');
@@ -947,11 +952,11 @@ export class UltimateTradingCommandCenter {
     // Efekt + bildirim
     if (isWin) {
       this.effects.emit('tp');
-      this.notify.success(`🎉 KÂR: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} — TP ${formatPrice(signal.tp)}`);
+      this.notify.success(`🎉 KÂR: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} — TP ${formatPrice(signal.tp, this.symbolInfo?.tickSize)}`);
       this.tts.speak('Kâr alındı. Tebrikler.');
     } else {
       this.effects.emit('sl');
-      this.notify.danger(`💥 STOP: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} — SL ${formatPrice(signal.sl)}`);
+      this.notify.danger(`💥 STOP: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} — SL ${formatPrice(signal.sl, this.symbolInfo?.tickSize)}`);
       this.tts.speak('Stop çalıştı. Pozisyon kapandı.');
     }
 
@@ -1188,6 +1193,45 @@ export class UltimateTradingCommandCenter {
     const tfMs = { '1m': 60000, '5m': 300000, '15m': 900000, '1h': 3600000, '4h': 14400000 }[this.currentTimeframe] || 900000;
     const remain = Math.max(0, Math.floor((last.time + tfMs - Date.now()) / 1000));
     this.ui.updateCandleCountdown(remain);
+  }
+
+  async fetchSymbolInfo(symbol) {
+    try {
+      // Binance exchangeInfo'dan sembol detaylarını al (tickSize hassasiyeti için)
+      const url = `https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`exchangeInfo ${res.status}`);
+      const data = await res.json();
+      const s = data.symbols?.[0];
+      if (!s) throw new Error('sembol bulunamadı');
+      const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
+      const lot = s.filters.find(f => f.filterType === 'LOT_SIZE');
+      const tickSize = priceFilter ? parseFloat(priceFilter.tickSize) : 0.01;
+      const stepSize = lot ? parseFloat(lot.stepSize) : 0.001;
+      const pricePrecision = priceFilter ? (priceFilter.tickSize.includes('.') ? priceFilter.tickSize.split('.')[1].replace(/0+$/, '').length : 0) : 2;
+      const quantityPrecision = lot ? (lot.stepSize.includes('.') ? lot.stepSize.split('.')[1].replace(/0+$/, '').length : 0) : 6;
+      this.symbolInfo = {
+        pricePrecision: pricePrecision || 2,
+        quantityPrecision: quantityPrecision || 6,
+        tickSize,
+        stepSize,
+        baseAsset: s.baseAsset,
+        quoteAsset: s.quoteAsset,
+        symbol: s.symbol,
+        status: s.status
+      };
+      // STATE'e de yaz (formatPrice ve diğerleri için)
+      if (typeof STATE !== 'undefined') STATE.symbolInfo = this.symbolInfo;
+      Logger.info('SymbolInfo', `${symbol} tickSize=${tickSize} prec=${pricePrecision} stepSize=${stepSize}`);
+      if (s.status !== 'TRADING') {
+        this.notify?.warning(`Sembol ${symbol} durumu: ${s.status}`);
+      }
+      return this.symbolInfo;
+    } catch (e) {
+      Logger.warn('SymbolInfo', `fetchSymbolInfo hatası ${symbol}:`, e.message);
+      // Fallback: eski sembolden devam et
+      return this.symbolInfo;
+    }
   }
 
   updateMetricsDisplay() {
@@ -1459,12 +1503,13 @@ export class UltimateTradingCommandCenter {
     this.notify.info(`Kehanet: ${prophecy === 'DEFENSIVE' ? '🛡️ Savunmacı' : prophecy === 'AGGRESSIVE' ? '⚔️ Saldırgan' : '⚖️ Dengeli'} mod aktif`);
   }
 
-  changeSymbol(raw) {
+  async changeSymbol(raw) {
     const s = (raw || '').toUpperCase().trim();
     if (!/^[A-Z0-9]{2,12}$/.test(s) || !s.endsWith('USDT')) {
       this.notify.warning('Geçersiz sembol (örn: BTCUSDT)');
       return;
     }
+    await this.fetchSymbolInfo(s);
     this.currentSymbol = s;
     this.saveData('utc_current_symbol', s);
     this.candles = [];

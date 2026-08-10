@@ -200,7 +200,7 @@ export class UIController {
       const filtered = this._getFilteredSignals(this.bot.signals || []);
       const sig = filtered[idx];
       if (sig) {
-        this.bot.showNotification?.(`${sig.direction.toUpperCase()} ${sig.symbol} Skor:${sig.score?.toFixed(1)} TP:${formatPrice(sig.tp)} SL:${formatPrice(sig.sl)}`, 'info', 8000);
+        this.bot.showNotification?.(`${sig.direction.toUpperCase()} ${sig.symbol} Skor:${sig.score?.toFixed(1)} TP:${formatPrice(sig.tp, STATE.symbolInfo?.tickSize)} SL:${formatPrice(sig.sl, STATE.symbolInfo?.tickSize)}`, 'info', 8000);
       }
     });
   }
@@ -208,10 +208,11 @@ export class UIController {
   // ── Görünüm güncellemeleri ───────────────────────────
   updateTicker() {
     const md = STATE.marketData;
+    const tickSize = STATE.symbolInfo?.tickSize || null;
     const sym = $('ticker-bar-symbol');
     if (sym) sym.textContent = md.symbol.replace('USDT', '/USDT');
     const price = $('ticker-bar-price');
-    if (price) price.textContent = formatPrice(md.price);
+    if (price) price.textContent = formatPrice(md.price, tickSize);
     const chg = $('price-change-24h');
     if (chg) {
       const ch = md.change24h;
@@ -224,14 +225,15 @@ export class UIController {
 
   updatePriceDisplay() {
     const md = STATE.marketData;
+    const tickSize = STATE.symbolInfo?.tickSize || null;
     const cur = $('current-price');
     if (cur) {
-      cur.textContent = formatPrice(md.price);
+      cur.textContent = formatPrice(md.price, tickSize);
       cur.style.color = md.price >= (this._lastShownPrice || 0) ? 'var(--positive)' : 'var(--negative)';
       this._lastShownPrice = md.price;
     }
     const atr = $('atr-value');
-    if (atr && STATE.indicators.atr) atr.textContent = formatPrice(STATE.indicators.atr);
+    if (atr && STATE.indicators.atr) atr.textContent = formatPrice(STATE.indicators.atr, tickSize);
   }
 
   updateConnection(status, text) {
@@ -528,9 +530,9 @@ export class UIController {
         <td>${(() => { try { return new Date(s.timestamp).toLocaleTimeString('tr-TR'); } catch(e) { try { return new Date(s.timestamp).toLocaleTimeString('en-US'); } catch { return new Date(s.timestamp).toISOString().slice(11,19); } } })()}</td>
         <td>${s.symbol || STATE.symbol}</td>
         <td>${s.direction?.toUpperCase() || '-'}</td>
-        <td>${formatPrice(s.price)}</td>
-        <td>${s.tp ? formatPrice(s.tp) : '-'}</td>
-        <td>${s.sl ? formatPrice(s.sl) : '-'}</td>
+        <td>${formatPrice(s.price, STATE.symbolInfo?.tickSize)}</td>
+        <td>${s.tp ? formatPrice(s.tp, STATE.symbolInfo?.tickSize) : '-'}</td>
+        <td>${s.sl ? formatPrice(s.sl, STATE.symbolInfo?.tickSize) : '-'}</td>
         <td>${s.score?.toFixed(1) ?? '-'}</td>
         <td style="color:${s.status === 'tp' ? 'var(--positive)' : s.status === 'sl' ? 'var(--negative)' : s.status === 'active' ? 'var(--primary)' : 'var(--neutral)'}">${s.status || 'aktif'}</td>
       </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Henüz sinyal yok</td></tr>';
