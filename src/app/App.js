@@ -1536,6 +1536,10 @@ export class UltimateTradingCommandCenter {
     this._setCheckbox('modal-enable-mtf-confirm', this.settings.features.enableMtfConfirm);
     this._setCheckbox('modal-enable-dynamic-sizing', this.settings.features.enableDynamicSizing);
     this._setCheckbox('modal-enable-tts', this.settings.features.enableTTS);
+    const vEl = document.getElementById('modal-volume-spike-threshold');
+    if (vEl) vEl.value = this.settings.signalThresholds.volumeSpikeThreshold;
+    const pEl = document.getElementById('modal-profit-target-percent');
+    if (pEl) pEl.value = this.settings.signalThresholds.profitTargetPercent;
 
     // Strateji toggles
     const box = document.getElementById('modal-strategy-toggles');
@@ -1599,6 +1603,10 @@ export class UltimateTradingCommandCenter {
     this.settings.features.enableMtfConfirm = bool('modal-enable-mtf-confirm');
     this.settings.features.enableDynamicSizing = bool('modal-enable-dynamic-sizing');
     this.settings.features.enableTTS = bool('modal-enable-tts');
+    const vVal = parseFloat(document.getElementById('modal-volume-spike-threshold')?.value);
+    if (!isNaN(vVal)) this.settings.signalThresholds.volumeSpikeThreshold = vVal;
+    const pVal = parseFloat(document.getElementById('modal-profit-target-percent')?.value);
+    if (!isNaN(pVal)) this.settings.signalThresholds.profitTargetPercent = pVal;
 
     this.tts.setEnabled(this.settings.features.enableTTS);
     this.saveSettings();
