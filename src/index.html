@@ -110,7 +110,7 @@
     </main>
   </div>
 
-  <!-- Panteon paneli -->
+  <!-- Panteon paneli — 5 elçi (Faz A #6) -->
   <aside id="panteon-panel">
     <div class="panteon-header">🏛️ PANTEON</div>
     <div class="elci-display">
@@ -128,19 +128,31 @@
       <span class="elci-mode" id="raphael-mode">İNANÇLI</span>
       <span class="elci-reputation" id="raphael-rep">100</span>
     </div>
+    <div class="elci-display">
+      <span class="elci-name gabriel">Gabriel</span>
+      <span class="elci-mode" id="gabriel-mode">İNANÇLI</span>
+      <span class="elci-reputation" id="gabriel-rep">100</span>
+    </div>
+    <div class="elci-display">
+      <span class="elci-name michael">Michael</span>
+      <span class="elci-mode" id="michael-mode">İNANÇLI</span>
+      <span class="elci-reputation" id="michael-rep">100</span>
+    </div>
   </aside>
 
-  <!-- Kehanet paneli -->
+  <!-- Kehanet paneli — Faz C: MTF özet eklendi -->
   <aside class="pantheon-panel kehanet-panel" id="kehanet-panel">
     <div class="kp-row"><span class="kp-key">📅 Seans</span><span class="kp-val" id="kp-session">—</span></div>
     <div class="kp-row"><span class="kp-key">🛡️ Koruma</span><span class="kp-val" id="kp-guardian">Aktif</span></div>
     <div class="kp-row"><span class="kp-key">⚖️ Rejim</span><span class="kp-val" id="kp-regime">—</span></div>
     <div class="kp-row"><span class="kp-key">⚔️ Nabız</span><span class="kp-val" id="kp-pulse">—</span></div>
+    <div class="kp-row"><span class="kp-key">📊 MTF</span><span class="kp-val" id="kp-mtf">—</span></div>
     <div class="kp-prophecy">
       <button id="prophecy-defensive" class="btn btn-tiny" title="Savunmacı">🛡️</button>
       <button id="prophecy-neutral" class="btn btn-tiny" title="Dengeli">⚖️</button>
       <button id="prophecy-aggressive" class="btn btn-tiny" title="Saldırgan">⚔️</button>
     </div>
+    <div style="font-size:9px; color:var(--text-secondary); text-align:center; margin-top:4px; opacity:0.7;">MTF 4/4 aynı yön → otomatik kehanet</div>
   </aside>
 
   <!-- Efekt katmanları -->
@@ -207,15 +219,48 @@
           <div class="panel-title">Aktif Stratejiler</div>
           <div id="modal-strategy-toggles" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px;"></div>
         </div>
+        <!-- Faz C: Strateji Performansı (Canlı Bayes) -->
         <div class="settings-group" style="grid-column: 1 / -1;">
-          <div class="panel-title">Sinyal Geçmişi</div>
+          <div class="panel-title">📊 Strateji Performansı (Canlı Bayes)</div>
+          <div class="data-table-container" style="max-height: 320px; overflow-y: auto;">
+            <table class="data-table" id="strategy-performance-table">
+              <thead>
+                <tr><th>Strateji</th><th>Elçi</th><th>WR%</th><th>W/L</th><th>Contrib</th><th>Ağırlık</th><th>Durum</th></tr>
+              </thead>
+              <tbody id="strategy-performance-body"><tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Yükleniyor...</td></tr></tbody>
+            </table>
+          </div>
+          <div style="margin-top:6px; display:flex; gap:6px; justify-content:flex-end;">
+            <button id="export-strategy-csv-btn" class="btn btn-tiny">CSV İndir</button>
+            <button id="refresh-strategy-perf-btn" class="btn btn-tiny">⟳ Yenile</button>
+          </div>
+        </div>
+        <!-- Faz C: Sinyal Geçmişi + Filtre + Export -->
+        <div class="settings-group" style="grid-column: 1 / -1;">
+          <div class="panel-title">📜 Sinyal Geçmişi</div>
+          <div class="signal-filter-bar" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+            <select id="filter-signal-direction" class="form-control" style="width:auto; flex:1; min-width:80px;">
+              <option value="">Yön: Hepsi</option><option value="buy">Buy</option><option value="sell">Sell</option>
+            </select>
+            <select id="filter-signal-status" class="form-control" style="width:auto; flex:1; min-width:80px;">
+              <option value="">Durum: Hepsi</option><option value="active">Aktif</option><option value="pending">Beklemede</option><option value="tp">TP</option><option value="sl">SL</option>
+            </select>
+            <input id="filter-signal-symbol" class="form-control" placeholder="Sembol (BTC)" style="flex:1; min-width:80px;" />
+            <button id="clear-signal-filter-btn" class="btn btn-tiny">Temizle</button>
+          </div>
           <div class="data-table-container" style="max-height: 260px; overflow-y: auto;">
             <table class="data-table">
               <thead>
-                <tr><th>Zaman</th><th>Sembol</th><th>Tip</th><th>Fiyat</th><th>TP</th><th>SL</th><th>Skor</th><th>Durum</th></tr>
+                <tr><th>Zaman</th><th>Sembol</th><th>Yön</th><th>Fiyat</th><th>TP</th><th>SL</th><th>Skor</th><th>Durum</th></tr>
               </thead>
               <tbody id="signal-history-body"></tbody>
             </table>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap;">
+            <span id="signal-filter-info" style="flex:1; font-size:10px; color:var(--text-secondary); align-self:center;"></span>
+            <button id="export-signal-csv-btn" class="btn btn-tiny">CSV</button>
+            <button id="export-signal-json-btn" class="btn btn-tiny">JSON</button>
+            <button id="clear-signal-history-btn" class="btn btn-tiny btn-danger">Geçmişi Temizle</button>
           </div>
         </div>
         <div class="settings-modal-footer">

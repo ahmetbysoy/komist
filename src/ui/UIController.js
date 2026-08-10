@@ -3,6 +3,7 @@
  * Ticker, sinyal barları, header, panteon/kehanet panelleri, modal'lar, çizelge görünümleri.
  * 
  * FIX 2026-08-10: Alt menü / çift tıklama / overlay kapanma sorunları düzeltildi
+ * FEAT Faz C (2026-08-10): Strateji performans paneli + MTF özet + sinyal filtre/export
  */
 import { STATE } from '../core/State.js';
 import { CONFIG } from '../core/Config.js';
@@ -13,6 +14,7 @@ const $ = (id) => document.getElementById(id);
 export class UIController {
   constructor(bot) {
     this.bot = bot;
+    this.signalFilters = { direction: '', status: '', symbol: '' };
     this._bindStatic();
   }
 
@@ -38,7 +40,6 @@ export class UIController {
     const mobileToggle = $('mobile-toggle-controls-btn');
     if (headerBar) {
       headerBar.addEventListener('click', (e) => {
-        // Butonun kendi handler'ı varsa çift tetiklenmesin
         if (e.target.closest('button') && e.target.id !== 'header-main-bar') return;
         this.bot.toggleHeader();
       });
@@ -49,7 +50,6 @@ export class UIController {
         this.bot.toggleHeader();
       });
     }
-    // Header içindeki diğer butonlar tıklanınca header toggle tetiklenmesin
     $('mobile-chart-view-btn')?.addEventListener('click', (e) => e.stopPropagation());
     $('mobile-heatmap-view-btn')?.addEventListener('click', (e) => e.stopPropagation());
     $('open-settings-modal-btn')?.addEventListener('click', (e) => e.stopPropagation());
@@ -79,28 +79,25 @@ export class UIController {
     $('save-settings-btn')?.addEventListener('click', () => this.bot.saveSettingsFromModal());
     $('reset-all-settings-btn')?.addEventListener('click', () => this.bot.resetAllSettings());
 
-    // FIX: Overlay dışına tıklayınca modal kapanma (kullanıcı beklentisi)
+    // FIX: Overlay dışına tıklayınca modal kapanma
     const overlay = $('settings-modal-overlay');
     if (overlay) {
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay) this.bot.closeSettingsModal();
       });
     }
-    // ESC ile modal kapat
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         const ov = $('settings-modal-overlay');
         if (ov?.classList.contains('visible')) this.bot.closeSettingsModal();
-        // Fullscreen de ESC ile çıksın
         if (document.body.classList.contains('fullscreen-chart')) this.bot.exitFullscreenChart();
       }
     });
 
-    // FIX: Çift tıklama ile menü — chart'a çift tıklayınca ayarlar, sinyal barlarına çift tıklayınca ayarlar
+    // FIX: Çift tıklama ile menü
     const liveChart = $('live-chart');
     if (liveChart) {
       liveChart.addEventListener('dblclick', () => this.bot.openSettingsModal());
-      // Tek tıklamada işaretleme oluyor ama tepki yok sorununu çözmek için pointer-events kontrolü
       liveChart.style.pointerEvents = 'auto';
     }
     const signalBars = $('signal-progress-bar-container');
@@ -108,7 +105,6 @@ export class UIController {
       signalBars.addEventListener('dblclick', () => this.bot.openSettingsModal());
       signalBars.title = 'Çift tıkla: Ayarlar';
     }
-    // Header'a çift tıklayınca da ayarlar
     headerBar?.addEventListener('dblclick', (e) => {
       if (e.target.closest('button')) return;
       this.bot.openSettingsModal();
@@ -125,22 +121,59 @@ export class UIController {
     // Grafiktir sinyallerini sil
     $('clear-markers-btn')?.addEventListener('click', () => this.bot.chartManager?.clearMarkers());
 
-    // FIX: Sinyal geçmişi satırına tıklayınca detay (ileride modal) — şimdilik log
+    // ── Faz C: Sinyal filtreleri ───────────────────────
+    $('filter-signal-direction')?.addEventListener('change', (e) => {
+      this.signalFilters.direction = e.target.value;
+      this.renderSignals(this.bot.signals || []);
+    });
+    $('filter-signal-status')?.addEventListener('change', (e) => {
+      this.signalFilters.status = e.target.value;
+      this.renderSignals(this.bot.signals || []);
+    });
+    $('filter-signal-symbol')?.addEventListener('input', (e) => {
+      this.signalFilters.symbol = e.target.value.toUpperCase().trim();
+      this.renderSignals(this.bot.signals || []);
+    });
+    $('clear-signal-filter-btn')?.addEventListener('click', () => {
+      this.signalFilters = { direction: '', status: '', symbol: '' };
+      const d = $('filter-signal-direction'); if (d) d.value = '';
+      const s = $('filter-signal-status'); if (s) s.value = '';
+      const sym = $('filter-signal-symbol'); if (sym) sym.value = '';
+      this.renderSignals(this.bot.signals || []);
+    });
+
+    // Faz C: Export butonları
+    $('export-signal-csv-btn')?.addEventListener('click', () => this.exportSignalCSV());
+    $('export-signal-json-btn')?.addEventListener('click', () => this.exportSignalJSON());
+    $('clear-signal-history-btn')?.addEventListener('click', () => {
+      if (confirm('Tüm sinyal geçmişi silinsin mi?')) {
+        this.bot.signals = [];
+        this.bot.pendingSignals = [];
+        this.bot.saveData('utc_signals', []);
+        this.renderSignals([]);
+        this.bot.notify?.warning('Sinyal geçmişi temizlendi');
+      }
+    });
+
+    // Faz C: Strateji performans export
+    $('export-strategy-csv-btn')?.addEventListener('click', () => this.exportStrategyCSV());
+    $('refresh-strategy-perf-btn')?.addEventListener('click', () => this.renderStrategyPerformance());
+
+    // Sinyal geçmişi satırına tıklama
     $('signal-history-body')?.addEventListener('click', (e) => {
       const tr = e.target.closest('tr');
       if (!tr) return;
       const idx = Array.from(tr.parentNode.children).indexOf(tr);
-      const sig = this.bot.signals?.[idx];
-      if (sig) {
-        console.log('Sinyal detay:', sig);
-        // İleride: this.bot.showSignalDetail(sig)
-      }
+      const filtered = this._getFilteredSignals(this.bot.signals || []);
+      const sig = filtered[idx];
+      if (sig) console.log('Sinyal detay:', sig);
     });
     $('signal-history-body')?.addEventListener('dblclick', (e) => {
       const tr = e.target.closest('tr');
       if (!tr) return;
       const idx = Array.from(tr.parentNode.children).indexOf(tr);
-      const sig = this.bot.signals?.[idx];
+      const filtered = this._getFilteredSignals(this.bot.signals || []);
+      const sig = filtered[idx];
       if (sig) {
         this.bot.showNotification?.(`${sig.direction.toUpperCase()} ${sig.symbol} Skor:${sig.score?.toFixed(1)} TP:${formatPrice(sig.tp)} SL:${formatPrice(sig.sl)}`, 'info', 8000);
       }
@@ -212,13 +245,14 @@ export class UIController {
     }
   }
 
-  /** Kehanet paneli */
-  updateKehanet({ session, regime, pulse, guardian }) {
+  /** Kehanet paneli — Faz C: mtf parametresi eklendi */
+  updateKehanet({ session, regime, pulse, guardian, mtf }) {
     const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
     set('kp-session', session);
     set('kp-regime', regime);
     set('kp-pulse', pulse);
     set('kp-guardian', guardian);
+    if (mtf !== undefined) set('kp-mtf', mtf);
   }
 
   updateCandleCountdown(secs) {
@@ -244,7 +278,6 @@ export class UIController {
       setTimeout(() => this.bot.chartManager?.resize(), 350);
     } catch (e) {
       console.error('toggleHeader hatası', e);
-      // Fallback: sadece class toggle
       document.body.classList.toggle('header-collapsed');
     }
   }
@@ -264,11 +297,114 @@ export class UIController {
     setTimeout(() => this.bot.chartManager?.resize(), 100);
   }
 
-  /** Sinyal listesi render (modal içindeki tablo) */
+  // ── Faz C: Strateji Performans Paneli ────────────────
+  renderStrategyPerformance() {
+    const tbody = $('strategy-performance-body');
+    if (!tbody) return;
+    const stats = this.bot.strategyStats || STATE.strategyStats || {};
+    const keys = this.bot.strategyKeys || Object.keys(stats);
+    
+    const rows = keys.map((key) => {
+      const s = stats[key]?.overall || { wins:0, losses:0, contrib:0, alpha:3, beta:2 };
+      const inst = this.bot.strategies?.[key];
+      const displayName = inst?.displayName || key;
+      const ambassador = this.bot.strategyAmbassadors?.[key]?.ambassador || '-';
+      const total = (s.wins||0) + (s.losses||0);
+      const wr = total > 0 ? ((s.wins/total)*100).toFixed(1) : '—';
+      const weight = this.bot.getStrategyWeight ? this.bot.getStrategyWeight(key).toFixed(2) : '-';
+      const live = inst?._isLive !== false ? '🟢 Canlı' : '🌑 Gölge';
+      const contrib = s.contrib || 0;
+      // Renk: WR >=55 yeşil, >=45 sarı, düşük kırmızı
+      const wrNum = total>0 ? (s.wins/total*100) : 0;
+      const wrColor = wrNum >=55 ? 'var(--positive)' : wrNum >=45 ? 'var(--neutral)' : 'var(--negative)';
+      return `<tr>
+        <td title="${key}">${displayName}</td>
+        <td style="font-size:9px;">${ambassador}</td>
+        <td style="color:${wrColor}; font-weight:700;">${wr}${total>0?'%':''}</td>
+        <td>${s.wins||0}/${s.losses||0}</td>
+        <td>${contrib}</td>
+        <td>${weight}</td>
+        <td style="font-size:10px;">${live}</td>
+      </tr>`;
+    }).join('');
+
+    // Sırala: contrib'e göre azalan (en çok katkı veren üstte)
+    // Şimdilik keys sırasını koruyoruz, kullanıcı isterse tabloda sort eklenebilir
+    tbody.innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Veri yok</td></tr>';
+
+    // Özet: en iyi / en kötü strateji
+    if (keys.length) {
+      const sorted = keys
+        .map(k => ({ k, s: stats[k]?.overall || {wins:0,losses:0} }))
+        .filter(x => (x.s.wins+x.s.losses)>0)
+        .sort((a,b) => (b.s.wins/(b.s.wins+b.s.losses||1)) - (a.s.wins/(a.s.wins+a.s.losses||1)));
+      if (sorted.length) {
+        // console log için, ileride kehanet paneline de yazılabilir
+      }
+    }
+  }
+
+  exportStrategyCSV() {
+    const stats = this.bot.strategyStats || {};
+    const keys = this.bot.strategyKeys || Object.keys(stats);
+    let csv = 'Strateji,Elci,WR,Wins,Losses,Contrib,Weight,Durum\n';
+    for (const key of keys) {
+      const s = stats[key]?.overall || { wins:0,losses:0,contrib:0 };
+      const ambassador = this.bot.strategyAmbassadors?.[key]?.ambassador || '';
+      const total = (s.wins||0)+(s.losses||0);
+      const wr = total>0 ? ((s.wins/total)*100).toFixed(1) : '';
+      const weight = this.bot.getStrategyWeight ? this.bot.getStrategyWeight(key).toFixed(2) : '';
+      const live = this.bot.strategies?.[key]?._isLive !== false ? 'Canli' : 'Golge';
+      const name = this.bot.strategies?.[key]?.displayName || key;
+      csv += `"${name}","${ambassador}","${wr}","${s.wins||0}","${s.losses||0}","${s.contrib||0}","${weight}","${live}"\n`;
+    }
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `komist-strateji-performans-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    this.bot.notify?.success('Strateji CSV indirildi');
+  }
+
+  // ── Faz C: Sinyal Geçmişi Filtre + Export ────────────
+  _getFilteredSignals(signals) {
+    const f = this.signalFilters;
+    return signals.filter(s => {
+      if (f.direction && s.direction !== f.direction) return false;
+      if (f.status && s.status !== f.status) return false;
+      if (f.symbol && !(s.symbol || '').includes(f.symbol)) return false;
+      return true;
+    });
+  }
+
   renderSignals(signals) {
     const tbody = $('signal-history-body');
     if (!tbody) return;
-    tbody.innerHTML = signals.slice(0, 50).map((s) => `
+    
+    const filtered = this._getFilteredSignals(signals);
+    const info = $('signal-filter-info');
+    if (info) {
+      if (filtered.length !== signals.length) {
+        info.textContent = `${filtered.length}/${signals.length} gösteriliyor (filtre aktif)`;
+      } else {
+        info.textContent = `${signals.length} sinyal`;
+      }
+    }
+
+    // Faz C: Strateji performansını da güncelle (her sinyal sonrası)
+    // Debounce ile çağrılmak daha iyi ama şimdilik doğrudan
+    if (signals.length !== this._lastSignalCount) {
+      this._lastSignalCount = signals.length;
+      // Modal açıksa performans tablosunu yenile
+      const overlay = $('settings-modal-overlay');
+      if (overlay?.classList.contains('visible')) {
+        // Biraz gecikmeli yenile (modal performans)
+        setTimeout(() => this.renderStrategyPerformance(), 100);
+      }
+    }
+
+    tbody.innerHTML = filtered.slice(0, 50).map((s) => `
       <tr style="cursor:pointer" title="Tıkla: detay, Çift tıkla: TP/SL göster">
         <td>${new Date(s.timestamp).toLocaleTimeString('tr-TR')}</td>
         <td>${s.symbol || STATE.symbol}</td>
@@ -277,8 +413,61 @@ export class UIController {
         <td>${s.tp ? formatPrice(s.tp) : '-'}</td>
         <td>${s.sl ? formatPrice(s.sl) : '-'}</td>
         <td>${s.score?.toFixed(1) ?? '-'}</td>
-        <td style="color:${s.status === 'tp' ? 'var(--positive)' : s.status === 'sl' ? 'var(--negative)' : 'var(--neutral)'}">${s.status || 'aktif'}</td>
+        <td style="color:${s.status === 'tp' ? 'var(--positive)' : s.status === 'sl' ? 'var(--negative)' : s.status === 'active' ? 'var(--primary)' : 'var(--neutral)'}">${s.status || 'aktif'}</td>
       </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Henüz sinyal yok</td></tr>';
+  }
+
+  exportSignalCSV() {
+    const signals = this._getFilteredSignals(this.bot.signals || []);
+    if (!signals.length) { this.bot.notify?.warning('Dışa aktarılacak sinyal yok'); return; }
+    let csv = 'Zaman,Sembol,Yon,Fiyat,TP,SL,Skor,Durum,KapanisFiyati,Sebep\n';
+    for (const s of signals) {
+      const t = new Date(s.timestamp).toISOString();
+      csv += `"${t}","${s.symbol||''}","${s.direction||''}","${s.price||''}","${s.tp||''}","${s.sl||''}","${s.score||''}","${s.status||''}","${s.closePrice||''}","${(s.reason||'').replace(/"/g,'""')}"\n`;
+    }
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `komist-sinyaller-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    this.bot.notify?.success(`${signals.length} sinyal CSV indirildi`);
+  }
+
+  exportSignalJSON() {
+    const signals = this._getFilteredSignals(this.bot.signals || []);
+    if (!signals.length) { this.bot.notify?.warning('Dışa aktarılacak sinyal yok'); return; }
+    const json = JSON.stringify(signals, null, 2);
+    const blob = new Blob([json], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `komist-sinyaller-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    this.bot.notify?.success(`${signals.length} sinyal JSON indirildi`);
+  }
+
+  // ── Faz C: MTF Özet ──────────────────────────────────
+  updateMtfDisplay() {
+    const el = $('kp-mtf');
+    if (!el || !this.bot.multiTimeframeManager) return;
+    
+    const tfList = ['5m','15m','1h','4h'];
+    const icons = { up: '↑', down: '↓', neutral: '→', unknown: '?' };
+    const colors = { up: 'var(--positive)', down: 'var(--negative)', neutral: 'var(--neutral)', unknown: 'var(--text-secondary)' };
+    
+    const parts = tfList.map(tf => {
+      const trend = this.bot.multiTimeframeManager.getTrend(tf);
+      const icon = icons[trend] || '?';
+      const color = colors[trend] || 'var(--text-secondary)';
+      return `<span style="color:${color}">${tf}:${icon}</span>`;
+    });
+    
+    el.innerHTML = parts.join(' ');
+    
+    // Tooltip için detay
+    const summary = this.bot.multiTimeframeManager.getSummary?.() || '';
+    el.title = summary + ' (EMA20 bazlı)';
   }
 }
 

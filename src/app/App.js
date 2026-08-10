@@ -165,7 +165,11 @@ export class UltimateTradingCommandCenter {
     this.countdownInterval = setInterval(() => this.updateCandleCountdown(), 1000);
     this.startPerformanceMonitor();
     this.ui.renderSignals(this.signals);
+    // Faz C: Strateji performans panelini ilk yüklemede doldur
+    try { this.ui.renderStrategyPerformance(); } catch(_){}
     this.ui.setView(this.currentMainView);
+    // Faz C: MTF özetini ilk yüklemede göster
+    try { this.ui.updateMtfDisplay(); } catch(_){}
     this.showFirstLight();
     Logger.info('App', 'Komuta Merkezi hazır. SİSTEMİ BAŞLAT butonuna tıklayın.');
     this.notify.info('Sistem hazır — başlatmak için "SİSTEMİ BAŞLAT" de.');
@@ -611,6 +615,11 @@ export class UltimateTradingCommandCenter {
     }
     this.saveStrategyStats();
     STATE.strategyStats = this.strategyStats;
+    // Faz C: Strateji performans panelini canlı yenile (modal açıksa)
+    try {
+      const overlay = document.getElementById('settings-modal-overlay');
+      if (overlay?.classList.contains('visible')) this.ui.renderStrategyPerformance();
+    } catch(_){}
 
     // CUSUM — Faz B #2: kötü drift -> otomatik aksiyon
     if (this.settings.features.enableCUSUMDrift && this.cusumDetector.update(isWin)) {
@@ -700,24 +709,79 @@ export class UltimateTradingCommandCenter {
     if (this.settings.features.enableSpoofDetection) {
       try { this.spoofDetector.autoOptimizeThreshold(); } catch(_) {}
     }
-    // Faz B #6: MTF/pulse heartbeat kontrolü (veri akmıyor mu?)
-    // (Basit sağlık kontrolü: lastPrice yaşını kontrol et, gerekirse mock'a düş)
+    // Faz C: MTF özet güncelle + otomatik kehanet
+    try {
+      this.ui.updateMtfDisplay();
+      this.checkMtfAutoProphecy();
+    } catch(_){}
+    // Faz C: Strateji performansını periyodik yenile (modal açıksa)
+    try {
+      const overlay = document.getElementById('settings-modal-overlay');
+      if (overlay?.classList.contains('visible')) this.ui.renderStrategyPerformance();
+    } catch(_){}
   }
 
   render() {
     this.ui.updateTicker();
     this.ui.updatePriceDisplay();
     this.ui.updateSignalBars(this.confluenceEngine.buyScore || 0, this.confluenceEngine.sellScore || 0);
+    // Faz C: MTF özetini kehanet paneline ekle
+    let mtfText = '—';
+    try {
+      const tfList = ['5m','15m','1h','4h'];
+      const icons = { up: '↑', down: '↓', neutral: '→', unknown: '?' };
+      mtfText = tfList.map(tf => {
+        const t = this.multiTimeframeManager?.getTrend(tf) || 'unknown';
+        return `${tf}:${icons[t]||'?'}`;
+      }).join(' ');
+    } catch(_){}
     this.ui.updateKehanet({
       session: `${this.sessionProfiler.getIcon()} ${this.sessionProfiler.current}`,
       regime: this.marketRegime,
       pulse: this.indicators.atr ? `ATR ${formatPrice(this.indicators.atr)}` : '—',
-      guardian: this.riskGuardian.killSwitchActivated ? '🚨 DURDURULDU' : 'Aktif'
+      guardian: this.riskGuardian.killSwitchActivated ? '🚨 DURDURULDU' : 'Aktif',
+      mtf: mtfText
     });
+    // Throttle MTF detay panelini de güncelle (ayrı element)
+    try { this.ui.updateMtfDisplay(); } catch(_){}
   }
 
   updateSession() {
     this.sessionProfiler.detect();
+  }
+
+  // Faz C: MTF 4/4 aynı yön → otomatik kehanet (throttle 5dk)
+  checkMtfAutoProphecy() {
+    if (!this.multiTimeframeManager?.data) return;
+    const tfList = ['5m','15m','1h','4h'];
+    const trends = tfList.map(tf => this.multiTimeframeManager.getTrend(tf));
+    if (trends.some(t => t === 'unknown' || t === 'neutral')) return; // hepsi net değilse bekle
+    const allUp = trends.every(t => t === 'up');
+    const allDown = trends.every(t => t === 'down');
+    const now = Date.now();
+    if (this._lastAutoProphecy && now - this._lastAutoProphecy < 300000) return; // 5dk throttle
+    if (allUp || allDown) {
+      const prop = allUp ? 'AGGRESSIVE' : 'AGGRESSIVE'; // her iki yönde de güçlü teyit → saldırgan
+      // Eğer 4/4 çelişkili olsaydı DEFENSIVE olacaktı, ama hepsi aynı yönde zaten teyit
+      // Çelişkili durum için ayrı kontrol: 2 up 2 down
+      // Burada sadece teyit durumu
+      this.panteon.applyProphecy(prop);
+      this._lastAutoProphecy = now;
+      Logger.info('MTF', `4/4 ${allUp?'UP':'DOWN'} teyit → otomatik kehanet ${prop}`);
+      // Düşük frekanslı bildirim (spam olmasın)
+      this.notify.info(`📊 MTF 4/4 ${allUp?'YUKARI':'AŞAĞI'} teyit → Kehanet: ${prop==='AGGRESSIVE'?'⚔️ Saldırgan':'🛡️ Savunmacı'}`);
+    } else {
+      // Çelişkili: 2 up 2 down gibi tam bölünme → DEFENSIVE
+      const upCount = trends.filter(t=>t==='up').length;
+      const downCount = trends.filter(t=>t==='down').length;
+      if (upCount===2 && downCount===2) {
+        if (this._lastAutoProphecy && now - this._lastAutoProphecy < 300000) return;
+        this.panteon.applyProphecy('DEFENSIVE');
+        this._lastAutoProphecy = now;
+        Logger.info('MTF', '2/2 çelişki → otomatik kehanet DEFENSIVE');
+        this.notify.info('📊 MTF çelişkili (2↗ 2↘) → Kehanet: 🛡️ Savunmacı');
+      }
+    }
   }
 
   updateCandleCountdown() {
@@ -884,6 +948,9 @@ export class UltimateTradingCommandCenter {
   openSettingsModal() {
     document.getElementById('settings-modal-overlay').classList.add('visible');
     this._populateModal();
+    // Faz C: Modal açılınca performans tablosunu doldur
+    try { this.ui.renderStrategyPerformance(); } catch(_){}
+    try { this.ui.renderSignals(this.signals); } catch(_){}
   }
 
   closeSettingsModal() {
