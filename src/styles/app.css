@@ -300,7 +300,15 @@ body.fullscreen-chart #chart-countdown-overlay { display: block !important; }
 /* ═══ MOBİL (768px) ═══ */
 @media screen and (max-width: 768px) {
   .desktop-only { display: none !important; }
-  .header { order: 2; position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; margin: 0; border-radius: 16px 16px 0 0; backdrop-filter: blur(16px); box-shadow: 0 -4px 20px rgba(0,0,0,0.4); border-top: 1px solid var(--border-color); }
+  .header { display: none !important; } /* Thin bar kullanıyoruz, eski header gizli */
+  #thin-bottom-nav { display: flex !important; }
+  #thin-ad-banner { display: flex !important; }
+  .container { padding-bottom: 46px; } /* 28px nav + 18px ad */
+  .main-grid { height: calc(100vh - 70px - 46px) !important; }
+  .center-panel { height: 100% !important; }
+  #live-chart { height: 100% !important; }
+  /* Eski header gizli olduğu için mobilde header ile ilgili stiller pasif */
+  .header { order: 2; position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; margin: 0; border-radius: 16px 16px 0 0; backdrop-filter: blur(16px); box-shadow: 0 -4px 20px rgba(0,0,0,0.4); border-top: 1px solid var(--border-color); display: none !important; }
   .header-top-bar { padding: 8px 12px; min-height: 48px; }
   .header-top-bar .btn { min-width: 48px; min-height: 44px; border-radius: 12px; font-size: 14px; }
   .header-top-bar .btn:active { transform: scale(0.95); }

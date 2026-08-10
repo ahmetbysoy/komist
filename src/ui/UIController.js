@@ -129,6 +129,35 @@ export class UIController {
     // Grafiktir sinyallerini sil
     $('clear-markers-btn')?.addEventListener('click', () => this.bot.chartManager?.clearMarkers());
 
+    // İnce Alt Navigasyon + Tam Ekran Sayfalar
+    document.querySelectorAll('#thin-bottom-nav [data-page]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const page = btn.dataset.page;
+        this.switchThinPage(page);
+        // Aktif durumu güncelle
+        document.querySelectorAll('#thin-bottom-nav .thin-nav-btn').forEach(b => {
+          b.style.color = 'var(--text-secondary)';
+          b.classList.remove('active');
+        });
+        btn.style.color = 'var(--primary)';
+        btn.classList.add('active');
+      });
+    });
+    $('thin-nav-start')?.addEventListener('click', () => {
+      const btn = document.getElementById('start-btn');
+      if (btn && !btn.disabled) btn.click();
+      else {
+        const stopBtn = document.getElementById('stop-btn');
+        if (stopBtn && !stopBtn.disabled) stopBtn.click();
+      }
+    });
+    $('thin-ad-close')?.addEventListener('click', () => {
+      const ad = document.getElementById('thin-ad-banner');
+      if (ad) ad.style.display = 'none';
+    });
+    // Başlangıçta Dash kapalı, sadece chart görünür (sayfalar gizli)
+    this.switchThinPage(null);
+
     // Kademeli Emir Defteri toggle (3s1.html)
     $('heatmap-view-heatmap-btn')?.addEventListener('click', () => {
       const canvas = document.getElementById('orderbook-heatmap');
@@ -355,6 +384,100 @@ export class UIController {
     if (heatView) heatView.style.display = view === 'heatmap' ? '' : 'none';
     if (view === 'chart') setTimeout(() => this.bot.chartManager?.resize(), 50);
     if (view === 'heatmap') this.bot.heatmapManager?.resize();
+  }
+
+  switchThinPage(page) {
+    document.querySelectorAll('.thin-page').forEach(el => el.style.display = 'none');
+    if (page) {
+      const target = document.getElementById(`page-${page}`);
+      if (target) {
+        target.style.display = 'block';
+        // İçeriği doldur
+        if (page === 'dash') this._fillDashPage();
+        else if (page === 'pending') this._fillPendingPage();
+        else if (page === 'history') this._fillHistoryPage();
+        else if (page === 'settings') {
+          // Ayarlar sayfasına mevcut ayarlar modalının içeriğini taşı
+          const modalBody = document.querySelector('#settings-modal-overlay .settings-modal-body');
+          const pageSettings = document.getElementById('page-settings');
+          if (modalBody && pageSettings) {
+            // İlk açılışta içeriği kopyala (sadece bir kere)
+            if (!pageSettings.dataset.filled) {
+              pageSettings.innerHTML = modalBody.innerHTML;
+              pageSettings.dataset.filled = 'true';
+              // Re-bind inputs for the new page (basitçe aynı ID'ler çalışır, ama eventler için tekrar bind gerekebilir)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  _fillDashPage() {
+    const page = document.getElementById('page-dash');
+    if (!page) return;
+    const md = STATE.marketData;
+    const price = md.price ? md.price.toFixed(2) : '—';
+    const change = md.change24h ? md.change24h.toFixed(2) + '%' : '—';
+    page.innerHTML = `
+      <div style="font-weight:700; color:var(--primary); margin-bottom:10px;">📊 Dashboard</div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px;">
+        <div style="background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:10px; text-align:center;">
+          <div style="font-size:9px; color:var(--text-secondary);">Fiyat</div>
+          <div style="font-size:16px; font-weight:700;">${price}</div>
+          <div style="font-size:10px; color:${parseFloat(change)>=0?'var(--positive)':'var(--negative)'}">${change}</div>
+        </div>
+        <div style="background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:10px; text-align:center;">
+          <div style="font-size:9px; color:var(--text-secondary);">Sembol</div>
+          <div style="font-size:14px; font-weight:700;">${md.symbol}</div>
+          <div style="font-size:9px; color:var(--text-secondary);">${this.bot.currentExchange?.toUpperCase() || 'BINANCE'}</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:6px; margin-bottom:10px;">
+        <button class="btn" style="flex:1;" onclick="document.getElementById('exchange-select').focus()">Borsa: ${this.bot.currentExchange || 'binance'}</button>
+        <button class="btn" style="flex:1;" onclick="document.getElementById('symbol-input').focus()">Sembol: ${md.symbol}</button>
+      </div>
+      <div id="dash-metrics" style="margin-top:10px;"></div>
+    `;
+    // Metrikleri dash'e de kopyala
+    const metrics = document.querySelector('.metrics-grid');
+    const dashMetrics = document.getElementById('dash-metrics');
+    if (metrics && dashMetrics) dashMetrics.innerHTML = metrics.innerHTML;
+  }
+
+  _fillPendingPage() {
+    const page = document.getElementById('page-pending');
+    if (!page) return;
+    const pending = this.bot.pendingSignals || [];
+    if (!pending.length) {
+      page.innerHTML = '<div style="text-align:center; color:var(--text-secondary); padding:20px;">Bekleyen sinyal yok — kırılım bekleniyor</div>';
+      return;
+    }
+    page.innerHTML = '<div style="font-weight:700; color:var(--primary); margin-bottom:8px;">⏳ Bekleyen Fırsatlar (' + pending.length + ')</div>' +
+      pending.map(s => `
+        <div style="background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:10px; margin-bottom:6px;">
+          <div style="display:flex; justify-content:space-between;"><b>${s.symbol}</b> <span style="color:${s.direction==='buy'?'var(--positive)':'var(--negative)'}">${s.direction.toUpperCase()}</span></div>
+          <div style="font-size:10px; color:var(--text-secondary);">Skor: ${s.score?.toFixed(1)} | ${new Date(s.timestamp).toLocaleTimeString('tr-TR')}</div>
+          <div style="font-size:9px; color:var(--text-secondary); margin-top:4px;">${s.reason || ''}</div>
+        </div>
+      `).join('');
+  }
+
+  _fillHistoryPage() {
+    const page = document.getElementById('page-history');
+    if (!page) return;
+    const hist = this.bot.tradingSystemMemory?.completedSignals || this.bot.signals.filter(s=>s.status==='tp'||s.status==='sl') || [];
+    if (!hist.length) {
+      page.innerHTML = '<div style="text-align:center; color:var(--text-secondary); padding:20px;">Henüz tamamlanmış sinyal yok</div>';
+      return;
+    }
+    page.innerHTML = '<div style="font-weight:700; color:var(--primary); margin-bottom:8px;">📈 Geçmiş (' + hist.length + ')</div>' +
+      hist.slice(-20).reverse().map(s => `
+        <div style="background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:8px; margin-bottom:6px; font-size:10px;">
+          <div style="display:flex; justify-content:space-between;"><span>${s.symbol} ${s.type?.toUpperCase()||s.direction?.toUpperCase()}</span><span style="color:${s.result==='success'||s.status==='tp'?'var(--positive)':'var(--negative)'}">${s.result||s.status}</span></div>
+          <div style="color:var(--text-secondary);">Giriş: ${s.entryPrice?.toFixed(2)} → Çıkış: ${s.exitPrice?.toFixed(2) || s.closePrice?.toFixed(2) || '-'} | Kar: ${(s.profitPercentage||s.pnl||0).toFixed(2)}%</div>
+        </div>
+      `).join('');
   }
 
   toggleHeader() {
