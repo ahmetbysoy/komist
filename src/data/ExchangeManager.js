@@ -1,11 +1,15 @@
 /**
  * ExchangeManager — Veri akışı (barva35 handleMarketData mantığı)
  * WS verilerini ilgili modüllere dağıtır:
- *  ticker → marketData + pozisyon yönetimi
- *  depth  → orderBook + heatmap + spoof + strateji analyzeOrderBook
- *  kline  → candles + chart + mum kapanışı (pending + indikatör)
- *  aggTrade → strateji processTrade
+ *  ticker → marketData + pozisyon yönetimi   (market WS)
+ *  depth  → orderBook + heatmap + spoof + strateji analyzeOrderBook (public WS)
+ *  kline  → candles + chart + mum kapanışı (pending + indikatör) (market WS)
+ *  aggTrade → strateji processTrade (market WS, live testte public altında da görülebilir)
  * Mock fallback: gerçek veri yoksa (CORS/ağ) random walk simülasyonu.
+ *
+ * P0 WS Migration: Binance 2026-04-23'te tek URL'yi kaldırdı, artık 2 routed endpoint var.
+ * ExchangeManager tek bir BinanceStream örneği oluşturur, BinanceStream içinde 2 WebSocket yönetilir.
+ * Dışarıdan API değişmez: connect(symbol,timeframe) → dual WS, disconnect() → ikisini kapat.
  */
 import { STATE } from '../core/State.js';
 import { CONFIG } from '../core/Config.js';
@@ -37,12 +41,30 @@ export class ExchangeManager {
     this.mock.stop();
     this.mockActive = false;
     this.zebani.reset();
+    Logger.info('ExchangeManager', `Connect ${symbol}@${timeframe} → public:${CONFIG.exchange.binanceWsPublic} market:${CONFIG.exchange.binanceWsMarket}`);
     this.stream.connect(symbol, timeframe);
   }
 
   disconnect() {
     this.stream.close();
     this.mock.stop();
+  }
+
+  /** Sağlık: son veri zamanları (Watchdog teşhis için) */
+  getHealth() {
+    const ls = this.stream?.lastSeen || {};
+    const now = Date.now();
+    const age = (k) => ls[k] ? Math.round((now - ls[k]) / 1000) + 's' : 'hiç gelmedi';
+    return {
+      publicWs: this.stream?.publicWs?.readyState === 1 ? 'open' : 'closed',
+      marketWs: this.stream?.marketWs?.readyState === 1 ? 'open' : 'closed',
+      lastSeen: {
+        ticker: age('ticker'),
+        depth: age('depth'),
+        kline: age('kline'),
+        aggTrade: age('aggTrade')
+      }
+    };
   }
 
   /** Kline geçmişi (REST) — barva35 fetchInitialData */

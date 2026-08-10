@@ -72,10 +72,19 @@ export const CONFIG = {
   staleThresholdMs: 5000,
 
   exchange: {
+    // P0 WS MIGRATION (2026-04-23 legacy decommission): Binance artık routed endpoint kullanıyor
+    // Public: depth/bookTicker gibi yüksek frekanslı emir defteri verisi
+    // Market: ticker/kline/aggTrade/forceOrder/markPrice gibi piyasa verisi
+    // Doküman: developers.binance.com — "Important WebSocket Change Notice"
+    binanceWsPublic: 'wss://fstream.binance.com/public/stream?streams=',
+    binanceWsMarket: 'wss://fstream.binance.com/market/stream?streams=',
+    // Legacy tek URL (deprecated, sadece /public verisi taşır — geriye dönük fallback için tutuluyor)
     binanceWs: 'wss://fstream.binance.com/stream?streams=',
     binanceRest: 'https://fapi.binance.com',
     reconnectBaseMs: 3000,
-    reconnectCapMs: 30000
+    reconnectCapMs: 30000,
+    watchdogMs: 60000,          // stream sessiz kalma eşiği (Watchdog)
+    watchdogCheckMs: 30000
   },
 
   zebani: {
