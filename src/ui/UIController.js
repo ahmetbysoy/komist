@@ -1,6 +1,8 @@
 /**
  * UIController — DOM bağlama ve görünüm güncelleme (barva35 initUI mantığı)
  * Ticker, sinyal barları, header, panteon/kehanet panelleri, modal'lar, çizelge görünümleri.
+ * 
+ * FIX 2026-08-10: Alt menü / çift tıklama / overlay kapanma sorunları düzeltildi
  */
 import { STATE } from '../core/State.js';
 import { CONFIG } from '../core/Config.js';
@@ -31,8 +33,26 @@ export class UIController {
     $('start-btn')?.addEventListener('click', () => this.bot.start());
     $('stop-btn')?.addEventListener('click', () => this.bot.stop());
 
-    // Header collapse (mobil kontroller)
-    $('header-main-bar')?.addEventListener('click', () => this.bot.toggleHeader());
+    // Header collapse (mobil kontroller) — FIX: hem header bar hem de ☰ butonu çalışsın, propagation durdurulsun
+    const headerBar = $('header-main-bar');
+    const mobileToggle = $('mobile-toggle-controls-btn');
+    if (headerBar) {
+      headerBar.addEventListener('click', (e) => {
+        // Butonun kendi handler'ı varsa çift tetiklenmesin
+        if (e.target.closest('button') && e.target.id !== 'header-main-bar') return;
+        this.bot.toggleHeader();
+      });
+    }
+    if (mobileToggle) {
+      mobileToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.bot.toggleHeader();
+      });
+    }
+    // Header içindeki diğer butonlar tıklanınca header toggle tetiklenmesin
+    $('mobile-chart-view-btn')?.addEventListener('click', (e) => e.stopPropagation());
+    $('mobile-heatmap-view-btn')?.addEventListener('click', (e) => e.stopPropagation());
+    $('open-settings-modal-btn')?.addEventListener('click', (e) => e.stopPropagation());
 
     // Görünüm: grafik / ısı haritası
     $('chart-view-btn')?.addEventListener('click', () => this.bot.setView('chart'));
@@ -59,6 +79,41 @@ export class UIController {
     $('save-settings-btn')?.addEventListener('click', () => this.bot.saveSettingsFromModal());
     $('reset-all-settings-btn')?.addEventListener('click', () => this.bot.resetAllSettings());
 
+    // FIX: Overlay dışına tıklayınca modal kapanma (kullanıcı beklentisi)
+    const overlay = $('settings-modal-overlay');
+    if (overlay) {
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) this.bot.closeSettingsModal();
+      });
+    }
+    // ESC ile modal kapat
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const ov = $('settings-modal-overlay');
+        if (ov?.classList.contains('visible')) this.bot.closeSettingsModal();
+        // Fullscreen de ESC ile çıksın
+        if (document.body.classList.contains('fullscreen-chart')) this.bot.exitFullscreenChart();
+      }
+    });
+
+    // FIX: Çift tıklama ile menü — chart'a çift tıklayınca ayarlar, sinyal barlarına çift tıklayınca ayarlar
+    const liveChart = $('live-chart');
+    if (liveChart) {
+      liveChart.addEventListener('dblclick', () => this.bot.openSettingsModal());
+      // Tek tıklamada işaretleme oluyor ama tepki yok sorununu çözmek için pointer-events kontrolü
+      liveChart.style.pointerEvents = 'auto';
+    }
+    const signalBars = $('signal-progress-bar-container');
+    if (signalBars) {
+      signalBars.addEventListener('dblclick', () => this.bot.openSettingsModal());
+      signalBars.title = 'Çift tıkla: Ayarlar';
+    }
+    // Header'a çift tıklayınca da ayarlar
+    headerBar?.addEventListener('dblclick', (e) => {
+      if (e.target.closest('button')) return;
+      this.bot.openSettingsModal();
+    });
+
     // Kehanet
     $('prophecy-defensive')?.addEventListener('click', () => this.bot.applyProphecy('DEFENSIVE'));
     $('prophecy-neutral')?.addEventListener('click', () => this.bot.applyProphecy('NEUTRAL'));
@@ -69,6 +124,27 @@ export class UIController {
 
     // Grafiktir sinyallerini sil
     $('clear-markers-btn')?.addEventListener('click', () => this.bot.chartManager?.clearMarkers());
+
+    // FIX: Sinyal geçmişi satırına tıklayınca detay (ileride modal) — şimdilik log
+    $('signal-history-body')?.addEventListener('click', (e) => {
+      const tr = e.target.closest('tr');
+      if (!tr) return;
+      const idx = Array.from(tr.parentNode.children).indexOf(tr);
+      const sig = this.bot.signals?.[idx];
+      if (sig) {
+        console.log('Sinyal detay:', sig);
+        // İleride: this.bot.showSignalDetail(sig)
+      }
+    });
+    $('signal-history-body')?.addEventListener('dblclick', (e) => {
+      const tr = e.target.closest('tr');
+      if (!tr) return;
+      const idx = Array.from(tr.parentNode.children).indexOf(tr);
+      const sig = this.bot.signals?.[idx];
+      if (sig) {
+        this.bot.showNotification?.(`${sig.direction.toUpperCase()} ${sig.symbol} Skor:${sig.score?.toFixed(1)} TP:${formatPrice(sig.tp)} SL:${formatPrice(sig.sl)}`, 'info', 8000);
+      }
+    });
   }
 
   // ── Görünüm güncellemeleri ───────────────────────────
@@ -120,7 +196,7 @@ export class UIController {
     if (stext) stext.textContent = sellScore.toFixed(1);
   }
 
-  /** Panteon paneli (3 elçi) */
+  /** Panteon paneli (5 elçi — DOM'da sadece 3 varsa gracefully degrade) */
   updatePanteon(elciler) {
     for (const e of elciler) {
       const mode = $(`${e.key}-mode`);
@@ -161,10 +237,16 @@ export class UIController {
   }
 
   toggleHeader() {
-    document.body.classList.toggle('header-collapsed');
-    STATE.headerCollapsed = document.body.classList.contains('header-collapsed');
-    this.bot.saveData('utc_header_collapsed', String(STATE.headerCollapsed));
-    setTimeout(() => this.bot.chartManager?.resize(), 350);
+    try {
+      document.body.classList.toggle('header-collapsed');
+      STATE.headerCollapsed = document.body.classList.contains('header-collapsed');
+      this.bot.saveData('utc_header_collapsed', String(STATE.headerCollapsed));
+      setTimeout(() => this.bot.chartManager?.resize(), 350);
+    } catch (e) {
+      console.error('toggleHeader hatası', e);
+      // Fallback: sadece class toggle
+      document.body.classList.toggle('header-collapsed');
+    }
   }
 
   togglePanteon() {
@@ -187,15 +269,15 @@ export class UIController {
     const tbody = $('signal-history-body');
     if (!tbody) return;
     tbody.innerHTML = signals.slice(0, 50).map((s) => `
-      <tr>
+      <tr style="cursor:pointer" title="Tıkla: detay, Çift tıkla: TP/SL göster">
         <td>${new Date(s.timestamp).toLocaleTimeString('tr-TR')}</td>
         <td>${s.symbol || STATE.symbol}</td>
-        <td>${s.type || '-'}</td>
+        <td>${s.direction?.toUpperCase() || '-'}</td>
         <td>${formatPrice(s.price)}</td>
         <td>${s.tp ? formatPrice(s.tp) : '-'}</td>
         <td>${s.sl ? formatPrice(s.sl) : '-'}</td>
         <td>${s.score?.toFixed(1) ?? '-'}</td>
-        <td style="color:${s.status === 'tp' ? 'var(--positive)' : s.status === 'sl' ? 'var(--negative)' : 'var(--neutral)'}">${s.status || ''}</td>
+        <td style="color:${s.status === 'tp' ? 'var(--positive)' : s.status === 'sl' ? 'var(--negative)' : 'var(--neutral)'}">${s.status || 'aktif'}</td>
       </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Henüz sinyal yok</td></tr>';
   }
 }

@@ -41,6 +41,11 @@ import { adx } from '../indicators/ADX.js';
 import { vwap } from '../indicators/VWAP.js';
 import { bollinger } from '../indicators/Bollinger.js';
 
+const safeClone = (obj) => {
+  try { return typeof structuredClone === 'function' ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)); }
+  catch { return JSON.parse(JSON.stringify(obj)); }
+};
+
 export class UltimateTradingCommandCenter {
   constructor() {
     // ── Kalıcılık altyapısı ─────────────────────────────
@@ -49,7 +54,7 @@ export class UltimateTradingCommandCenter {
 
     // ── Ayarlar & durum ────────────────────────────────
     // NOT: storage henüz ready değil (async init'te yüklenecek), burada sadece default kullan
-    this.settings = structuredClone(DEFAULT_SETTINGS);
+    this.settings = safeClone(DEFAULT_SETTINGS);
     // StorageBridge ready olmadan getJsonSync hep null döner -> default kullan, init() içinde gerçek değer yüklenecek
     this.currentSymbol = CONFIG.defaultSymbol;
     this.currentTimeframe = CONFIG.defaultTimeframe;
@@ -129,7 +134,7 @@ export class UltimateTradingCommandCenter {
     // Constructor'da default yüklenmişti, şimdi storage ready -> gerçek kalıcı veriyi yükle
     const persistedSettings = this.storage.getJsonSync('utc_settings');
     if (persistedSettings) {
-      this.settings = { ...structuredClone(DEFAULT_SETTINGS), ...persistedSettings };
+      this.settings = { ...safeClone(DEFAULT_SETTINGS), ...persistedSettings };
     }
     // Sembol/timeframe kalıcılığı (Faz A #8)
     this.currentSymbol = this.storage.getJsonSync('utc_current_symbol') || CONFIG.defaultSymbol;
@@ -801,13 +806,13 @@ export class UltimateTradingCommandCenter {
     try {
       if (this.storage?.ready) {
         const fromStorage = this.storage.getJsonSync('utc_settings');
-        if (fromStorage) return { ...structuredClone(DEFAULT_SETTINGS), ...fromStorage };
+        if (fromStorage) return { ...safeClone(DEFAULT_SETTINGS), ...fromStorage };
       }
       // Fallback: sadece ilk açılışta migration öncesi eski localStorage verisi varsa (Migration zaten taşıdıysa bu dal çalışmaz)
       const raw = localStorage.getItem('utc_settings');
-      if (raw) return { ...structuredClone(DEFAULT_SETTINGS), ...JSON.parse(raw) };
+      if (raw) return { ...safeClone(DEFAULT_SETTINGS), ...JSON.parse(raw) };
     } catch (_) {}
-    return structuredClone(DEFAULT_SETTINGS);
+    return safeClone(DEFAULT_SETTINGS);
   }
 
   saveStrategyStats() {
@@ -986,7 +991,7 @@ export class UltimateTradingCommandCenter {
   }
 
   resetAllSettings() {
-    this.settings = structuredClone(DEFAULT_SETTINGS);
+    this.settings = safeClone(DEFAULT_SETTINGS);
     this.saveSettings();
     this.closeSettingsModal();
     this.notify.warning('Tüm ayarlar sıfırlandı.');
