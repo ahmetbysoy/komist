@@ -570,6 +570,11 @@ export class UIController {
   _drawSparkline(svgId, values, color) {
     const svg = $(svgId);
     if (!svg || !values.length) return;
+    if (values.length === 1) {
+      // Tek nokta için ortada yatay çizgi
+      svg.innerHTML = `<line x1="0" y1="12" x2="80" y2="12" stroke="${color}" stroke-width="1.5" stroke-linecap="round" />`;
+      return;
+    }
     const w = 80, h = 24;
     const min = Math.min(...values);
     const max = Math.max(...values);
@@ -577,7 +582,7 @@ export class UIController {
     const points = values.map((v,i) => {
       const x = (i / (values.length-1)) * w;
       const y = h - ((v - min) / range) * h;
-      return `${x},${y}`;
+      return `${isFinite(x) && isFinite(y) ? `${x},${y}` : `0,${h/2}`}`;
     }).join(' ');
     svg.innerHTML = `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />`;
   }
