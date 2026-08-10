@@ -50,6 +50,7 @@ import { adx } from '../indicators/ADX.js';
 import { vwap } from '../indicators/VWAP.js';
 import { bollinger } from '../indicators/Bollinger.js';
 import { CVD } from '../indicators/CVD.js';
+import { ApiQueue } from '../core/ApiQueue.js';
 
 // NOT: WatchlistManager / BacktestEngine (TradingCore ayrımı) / CloudSyncManager (Firebase/Telegram)
 // 10.08.2026 tarihinde proje sahibi tarafından açıkça REDDEDİLDİ — bir daha teklif edilmemeli
@@ -153,6 +154,7 @@ export class UltimateTradingCommandCenter {
     this.performanceInterval = null;
     this.sessionInterval = null;
     this.evaluationInterval = null;
+    this.apiQueue = new ApiQueue(200);
     this.isRunning = false;
     this.reconnectAttempts = 0;
     this.reconnectDelay = 3000;
@@ -315,10 +317,13 @@ export class UltimateTradingCommandCenter {
     if (status === 'online') {
       this.ui.updateConnection(true, 'BAĞLANTI VAR');
     } else if (status === 'reconnecting') {
-      this.ui.updateConnection(false, `YENİDEN BAĞLANILIYOR... (${Math.round(delay / 1000)}s)`);
+      const attempt = this.exchange?.stream?.publicAttempts || this.exchange?.stream?.marketAttempts || 0;
+      this.ui.updateConnection(false, `YENİDEN BAĞLANILIYOR... (${Math.round(delay / 1000)}s) [${attempt}]`);
     } else {
       this.ui.updateConnection(false, 'BAĞLANTI YOK');
     }
+    // Son mesaj zamanını güncelle (BÖLÜM 1)
+    try { this._lastConnectionUpdate = Date.now(); } catch(_){}
   }
 
   handleMarketData(streamType, data) {
@@ -450,18 +455,19 @@ export class UltimateTradingCommandCenter {
 
   // ── Yapay Zeka Hafızası: Kline ile t60 değerlendirmesi (senin Madde 3) ──
   async fetchKlineData(symbol, interval, startTime, endTime, limit = 1) {
-    try {
-      const url = `${CONFIG.exchange.binanceRest}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${limit}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) throw new Error(`Kline HTTP ${res.status}`);
-      const data = await res.json();
-      if (!Array.isArray(data) || !data.length) return null;
-      // data[0] = [openTime, open, high, low, close, volume, ...]
-      return { close: parseFloat(data[0][4]), time: data[0][0] };
-    } catch (e) {
-      Logger.debug('KlineFetch', `fetchKlineData hatası ${symbol} ${interval}:`, e.message);
-      return null;
-    }
+    return this.apiQueue.enqueue(async () => {
+      try {
+        const url = `${CONFIG.exchange.binanceRest}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${limit}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) throw new Error(`Kline HTTP ${res.status}`);
+        const data = await res.json();
+        if (!Array.isArray(data) || !data.length) return null;
+        return { close: parseFloat(data[0][4]), time: data[0][0] };
+      } catch (e) {
+        Logger.debug('KlineFetch', `fetchKlineData hatası ${symbol} ${interval}:`, e.message);
+        return null;
+      }
+    });
   }
 
   async evaluatePendingSignals() {

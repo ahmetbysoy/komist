@@ -38,6 +38,8 @@ export class BinanceStream {
 
     // Watchdog — Faz D fix: forceOrder/markPrice ayrı slotlarda, aggTrade/ticker'ı maskelemesin
     this.lastSeen = { ticker: 0, depth: 0, kline: 0, aggTrade: 0, forceOrder: 0, markPrice: 0, any: 0 };
+    this.packetCounts = { sent: 0, received: 0, publicSent: 0, marketSent: 0 };
+    this.lastPing = 0;
     this.watchdogTimer = null;
   }
 
@@ -202,7 +204,8 @@ export class BinanceStream {
     const base = CONFIG.exchange.reconnectBaseMs;
     const cap = CONFIG.exchange.reconnectCapMs;
     this.publicAttempts += 1;
-    const delay = Math.min(cap, base * 2 ** (this.publicAttempts - 1));
+    const jitter = Math.random() * 1000;
+    const delay = Math.min(cap, base * 2 ** (this.publicAttempts - 1) + jitter);
     this.handlers.onStatus?.('reconnecting', delay);
     Logger.info('BinanceStream', `Public ${delay / 1000}s sonra yeniden bağlanıyor (deneme ${this.publicAttempts})`);
     clearTimeout(this.publicTimer);
@@ -215,7 +218,8 @@ export class BinanceStream {
     const base = CONFIG.exchange.reconnectBaseMs;
     const cap = CONFIG.exchange.reconnectCapMs;
     this.marketAttempts += 1;
-    const delay = Math.min(cap, base * 2 ** (this.marketAttempts - 1));
+    const jitter = Math.random() * 1000;
+    const delay = Math.min(cap, base * 2 ** (this.marketAttempts - 1) + jitter);
     this.handlers.onStatus?.('reconnecting', delay);
     Logger.info('BinanceStream', `Market ${delay / 1000}s sonra yeniden bağlanıyor (deneme ${this.marketAttempts})`);
     clearTimeout(this.marketTimer);

@@ -224,8 +224,28 @@ export class UIController {
   updateConnection(status, text) {
     const dot = $('connection-status');
     const txt = $('connection-text');
+    const detail = $('connection-detail');
+    const lastmsg = $('conn-lastmsg');
+    const packets = $('conn-packets');
     if (dot) dot.className = 'status-dot ' + (status ? 'online' : '');
     if (txt) txt.textContent = text || (status ? 'BAĞLANTI VAR' : 'BAĞLANTI YOK');
+    // Detay: son paket ve ping (BÖLÜM 1)
+    try {
+      const health = this.bot.exchange?.getHealth?.();
+      if (health) {
+        if (detail) detail.textContent = `P:${health.lastSeen.ticker} D:${health.lastSeen.depth} K:${health.lastSeen.kline}`;
+        if (lastmsg) {
+          const now = Date.now();
+          const last = this.bot.exchange.stream?.lastSeen?.any || 0;
+          const ago = last ? Math.round((now - last)/1000) + 's önce' : '—';
+          lastmsg.textContent = `son: ${ago}`;
+        }
+        if (packets && this.bot.exchange.stream?.packetCounts) {
+          const pc = this.bot.exchange.stream.packetCounts;
+          packets.textContent = `${pc.received || 0} pkt`;
+        }
+      }
+    } catch(_){}
   }
 
   /** Sinyal barları (METATRON GÜVENİ / URIEL CESARETİ) */
