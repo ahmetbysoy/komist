@@ -31,12 +31,27 @@ export class OrderFlowMomentumStrategy extends Strategy {
     if (total <= 0) return;
 
     const buyRatio = buy / total;
+    // Faz D: CVD ile çapraz doğrulama (varsa)
+    let cvdConfirm = true;
+    let cvdNote = '';
+    try {
+      const cvd = this.bot.cvd?.getValue?.();
+      if (typeof cvd === 'number' && this.bot.cvd?.history?.length > 20) {
+        const cvdDelta = this.bot.cvd.history.slice(-10).reduce((s, h) => s + (h.delta||0), 0);
+        // Alım akışı + CVD pozitif → güçlü teyit
+        if (buyRatio > this.DELTA_RATIO && cvdDelta < 0) cvdConfirm = false;
+        if (buyRatio < 1 - this.DELTA_RATIO && cvdDelta > 0) cvdConfirm = false;
+        if (cvdDelta !== 0) cvdNote = ` CVD:${(cvdDelta/1000).toFixed(0)}k`;
+      }
+    } catch(_){}
+    if (!cvdConfirm) return; // CVD çelişiyorsa sinyal üretme
+
     if (buyRatio > this.DELTA_RATIO) {
       this.propose(this.bot.marketData.symbol, 'buy',
-        `Alım akışı %${(buyRatio * 100).toFixed(0)} (5s)`, 4);
+        `Alım akışı %${(buyRatio * 100).toFixed(0)} (5s)${cvdNote}`, 4);
     } else if (buyRatio < 1 - this.DELTA_RATIO) {
       this.propose(this.bot.marketData.symbol, 'sell',
-        `Satım akışı %${((1 - buyRatio) * 100).toFixed(0)} (5s)`, 4);
+        `Satım akışı %${((1 - buyRatio) * 100).toFixed(0)} (5s)${cvdNote}`, 4);
     }
   }
 }

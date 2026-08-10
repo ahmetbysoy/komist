@@ -87,6 +87,7 @@ export class Strategy {
   // Hook'lar — varsayılan no-op
   analyzeOrderBook() {}
   processTrade() {}
+  processForceOrder() {}
   periodicAnalyze() {}
 }
 

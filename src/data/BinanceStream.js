@@ -16,7 +16,7 @@ import { Logger } from '../core/Logger.js';
 
 export class BinanceStream {
   /**
-   * @param {Object} handlers { onTicker, onDepth, onKline, onAggTrade, onStatus }
+   * @param {Object} handlers { onTicker, onDepth, onKline, onAggTrade, onForceOrder, onMarkPrice, onStatus }
    */
   constructor(handlers = {}) {
     this.handlers = handlers;
@@ -106,8 +106,9 @@ export class BinanceStream {
     const streams = [
       `${sym}@ticker`,
       `${sym}@aggTrade`,
-      `${sym}@kline_${this.timeframe}`
-      // İleride eklenebilir: `${sym}@markPrice`, `${sym}@forceOrder`
+      `${sym}@kline_${this.timeframe}`,
+      `!forceOrder@arr`,
+      `${sym}@markPrice@1s`
     ];
     const base = CONFIG.exchange.binanceWsMarket || CONFIG.exchange.binanceWs;
     const url = base + streams.join('/');
@@ -170,11 +171,26 @@ export class BinanceStream {
       // Ham trade stream'i (Binance @trade) → aggTrade handler'ına yönlendir (live testte public altında görülebiliyor)
       this.lastSeen.aggTrade = now;
       this.handlers.onAggTrade?.(data);
-    } else if (at.startsWith('forceOrder')) {
-      // Gelecekte forceOrder için: şimdilik log + watchdog
+    } else if (at.startsWith('forceOrder') || stream.includes('forceOrder')) {
       this.lastSeen.aggTrade = now;
-      Logger.info('BinanceStream', `forceOrder geldi (${source}):`, data);
-      // this.handlers.onForceOrder?.(data);
+      // Binance !forceOrder@arr formatı: {o: {s, S, p, q, ...}} veya {s, S, p, q}
+      const order = data.o || data;
+      const forceOrder = {
+        symbol: order.s || this.symbol,
+        side: order.S || order.side || 'SELL', // S: SELL/BUY (likidasyon yönü)
+        price: parseFloat(order.p || order.price || 0),
+        quantity: parseFloat(order.q || order.quantity || 0),
+        notional: parseFloat(order.q || 0) * parseFloat(order.p || 0),
+        ts: order.T || Date.now(),
+        raw: data
+      };
+      // Sadece ilgili sembol için filtrele (all-arr ise)
+      if (forceOrder.symbol === this.symbol || stream === '!forceOrder@arr') {
+        this.handlers.onForceOrder?.(forceOrder);
+      }
+    } else if (at.startsWith('markPrice') || stream.includes('markPrice')) {
+      this.lastSeen.ticker = now;
+      this.handlers.onMarkPrice?.(data);
     } else {
       // Bilinmeyen stream — yine de logla (sessiz kesilmeyi fark etmek için)
       Logger.debug('BinanceStream', `Bilinmeyen stream (${source}): ${stream}`);

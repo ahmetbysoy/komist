@@ -9,3 +9,4 @@ export { bollinger } from './Bollinger.js';
 export { adx } from './ADX.js';
 export { vwap } from './VWAP.js';
 export { superTrend } from './SuperTrend.js';
+export { CVD, calculateCVD, cvdDeltaRatio } from './CVD.js';

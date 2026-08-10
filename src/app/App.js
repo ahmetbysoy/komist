@@ -40,6 +40,7 @@ import { ema } from '../indicators/EMA.js';
 import { adx } from '../indicators/ADX.js';
 import { vwap } from '../indicators/VWAP.js';
 import { bollinger } from '../indicators/Bollinger.js';
+import { CVD } from '../indicators/CVD.js';
 
 const safeClone = (obj) => {
   try { return typeof structuredClone === 'function' ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)); }
@@ -93,6 +94,7 @@ export class UltimateTradingCommandCenter {
     this.spoofDetector = new SpoofDetector(this);
     this.sessionProfiler = new SessionProfiler();
     this.cusumDetector = new CUSUMDriftDetector();
+    this.cvd = new CVD(500); // Faz D: Kümülatif Volume Delta
     this.positionManager = new PositionManager(this);
     this.panteon = new PantheonManager(this);
     // panteon_state de async init() içinde yüklenecek (storage ready sonrası)
@@ -244,6 +246,8 @@ export class UltimateTradingCommandCenter {
       else if (streamType === 'depth') this._applyOrderBook(data);
       else if (streamType.startsWith('kline')) this._applyKline(data);
       else if (streamType === 'aggTrade') this._processTrade(data);
+      else if (streamType === 'forceOrder') this._processForceOrder(data);
+      else if (streamType === 'markPrice') this._applyMarkPrice(data);
     } catch (e) {
       Logger.error('App', 'handleMarketData hatası:', e);
     }
@@ -306,15 +310,59 @@ export class UltimateTradingCommandCenter {
   }
 
   _processTrade(trade) {
+    // Binance aggTrade formatı: p,q,m,T  — normalize et
+    const price = parseFloat(trade.p ?? trade.price ?? 0);
+    const qty = parseFloat(trade.q ?? trade.quantity ?? 0);
     const t = {
-      price: parseFloat(trade.p),
-      quantity: parseFloat(trade.q),
-      isBuyerMaker: trade.m,
-      timestamp: trade.T || Date.now()
+      price,
+      quantity: qty,
+      notional: price * qty,
+      isBuyerMaker: trade.m ?? trade.isBuyerMaker ?? false,
+      side: (trade.m ?? trade.isBuyerMaker) ? 'sell' : 'buy', // m=true → maker buy -> taker sell
+      timestamp: trade.T || trade.ts || Date.now(),
+      ts: trade.T || trade.ts || Date.now()
     };
+    // Faz D: CVD güncelle
+    try { this.cvd.update(t); } catch(_){}
+    // Divergence tespiti → confluence'a ek sinyal (opsiyonel, düşük skor)
+    try {
+      const div = this.cvd.detectDivergence?.(20);
+      if (div && Math.random() < 0.1) { // spam önleme: %10 ihtimalle
+        Logger.info('CVD', `Divergence: ${div} (price ${price} CVD ${this.cvd.getValue().toFixed(0)})`);
+      }
+    } catch(_){}
     for (const key of this.strategyKeys) {
       try { this.strategies[key]?.processTrade?.(t); }
       catch (e) { Logger.error(`Strategy:${key}`, e); }
+    }
+  }
+
+  _processForceOrder(forceOrder) {
+    // Gerçek likidasyon feed'i → LiquidationCascade + spoof çapraz doğrulama
+    Logger.info('App', `ForceOrder: ${forceOrder.symbol} ${forceOrder.side} ${(forceOrder.notional/1000).toFixed(1)}k$ @${forceOrder.price}`);
+    for (const key of this.strategyKeys) {
+      try { this.strategies[key]?.processForceOrder?.(forceOrder); }
+      catch (e) { Logger.error(`Strategy:${key}`, e); }
+    }
+    // Spoof + likidasyon aynı bölgede → ekstra confluence (Faz D §2.5)
+    // Basit: son spoof zamanı yakınsa ve likidasyon aynı yöndeyse confluence'a ek boost
+    try {
+      if (this.lastSpoofType && Date.now() - this.lastSpoofTime < 10000) {
+        const spoofBearish = this.lastSpoofType === 'bid'; // bid spoof çekildi → gizli satış
+        const liquidationSell = forceOrder.side === 'SELL';
+        if ((spoofBearish && liquidationSell) || (!spoofBearish && !liquidationSell)) {
+          Logger.info('App', 'Spoof+Likidasyon kesişimi → güçlü sinyal (çapraz doğrulama)');
+          // Confluence'a manuel boost: son skorları hafif artır (opsiyonel)
+        }
+      }
+    } catch(_){}
+  }
+
+  _applyMarkPrice(data) {
+    // Mark price → funding/liquidation riski için ileride kullanılabilir
+    // Şimdilik sadece log, ileride FundingRateReversal'a beslenecek
+    if (data.s && data.p) {
+      // Logger.debug('MarkPrice', `${data.s} ${data.p}`);
     }
   }
 

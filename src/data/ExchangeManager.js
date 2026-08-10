@@ -19,13 +19,20 @@ import { MockDataGenerator } from './MockDataGenerator.js';
 import { ZebaniFilter } from './ZebaniFilter.js';
 
 export class ExchangeManager {
-  constructor(bot) {
+  /**
+   * @param {Object} bot
+   * @param {Class} StreamClass - Borsa-agnostik: BinanceStream | BybitStream | OKXStream (aynı handler sözleşmesi)
+   */
+  constructor(bot, StreamClass = BinanceStream) {
     this.bot = bot;
-    this.stream = new BinanceStream({
+    this.StreamClass = StreamClass;
+    this.stream = new StreamClass({
       onTicker: (d) => this.bot.handleMarketData('ticker', d),
       onDepth: (d) => this.bot.handleMarketData('depth', d),
       onKline: (d) => this.bot.handleMarketData('kline', d),
       onAggTrade: (d) => this.bot.handleMarketData('aggTrade', d),
+      onForceOrder: (d) => this.bot.handleMarketData('forceOrder', d),
+      onMarkPrice: (d) => this.bot.handleMarketData('markPrice', d),
       onStatus: (s, delay) => this.bot.onConnectionStatus?.(s, delay)
     });
     this.mock = new MockDataGenerator({
@@ -41,7 +48,8 @@ export class ExchangeManager {
     this.mock.stop();
     this.mockActive = false;
     this.zebani.reset();
-    Logger.info('ExchangeManager', `Connect ${symbol}@${timeframe} → public:${CONFIG.exchange.binanceWsPublic} market:${CONFIG.exchange.binanceWsMarket}`);
+    const streamName = this.StreamClass?.name || 'BinanceStream';
+    Logger.info('ExchangeManager', `Connect ${symbol}@${timeframe} via ${streamName} → public:${CONFIG.exchange.binanceWsPublic} market:${CONFIG.exchange.binanceWsMarket}`);
     this.stream.connect(symbol, timeframe);
   }
 
