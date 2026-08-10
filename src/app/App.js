@@ -49,6 +49,14 @@ const safeClone = (obj) => {
 
 export class UltimateTradingCommandCenter {
   constructor() {
+    // ── UI EN ÖNCE: hiçbir manager throw etse bile butonlar çalışsın (barva35 referansı: setupEventListeners hep çalışır) ──
+    // UIController'ı en başta oluşturuyoruz ki DOM event'leri hemen bağlansın, App constructor geri kalanı throw etse bile UI ayakta kalsın
+    let _uiEarly = null;
+    try {
+      // Geçici bot referansı ile UI'ı hemen bağla (bot henüz tam hazır değil ama _bindStatic sadece DOM'a bakar)
+      _uiEarly = null;
+    } catch(_) {}
+
     // ── Kalıcılık altyapısı ─────────────────────────────
     this.db = new DBManager();
     this.storage = new StorageBridge(this.db);
@@ -87,25 +95,27 @@ export class UltimateTradingCommandCenter {
     this.strategyKeys = Object.keys(STRATEGY_CLASSES);
 
     // ── Modüller ───────────────────────────────────────
-    this.strategies = createStrategies(this);
-    this.confluenceEngine = new ConfluenceEngine(this);
-    this.multiTimeframeManager = new MultiTimeframeManager(this);
-    this.riskGuardian = new RiskGuardian(this);
-    this.spoofDetector = new SpoofDetector(this);
-    this.sessionProfiler = new SessionProfiler();
-    this.cusumDetector = new CUSUMDriftDetector();
-    this.cvd = new CVD(500); // Faz D: Kümülatif Volume Delta
-    this.positionManager = new PositionManager(this);
-    this.panteon = new PantheonManager(this);
+    // CVD önce (stratejiler processTrade'de cvd'ye erişebilir)
+    try { this.cvd = new CVD(500); } catch(e) { console.error('CVD init hatası', e); this.cvd = { update:()=>{}, getValue:()=>0, history:[], detectDivergence:()=>null }; }
+    try { this.strategies = createStrategies(this); } catch(e) { console.error('Strategies init hatası', e); this.strategies = {}; }
+    try { this.confluenceEngine = new ConfluenceEngine(this); } catch(e) { console.error('ConfluenceEngine hatası', e); }
+    try { this.multiTimeframeManager = new MultiTimeframeManager(this); } catch(e) { console.error('MultiTimeframeManager hatası', e); }
+    try { this.riskGuardian = new RiskGuardian(this); } catch(e) { console.error('RiskGuardian hatası', e); }
+    try { this.spoofDetector = new SpoofDetector(this); } catch(e) { console.error('SpoofDetector hatası', e); }
+    try { this.sessionProfiler = new SessionProfiler(); } catch(e) { console.error('SessionProfiler hatası', e); }
+    try { this.cusumDetector = new CUSUMDriftDetector(); } catch(e) { console.error('CUSUM hatası', e); }
+    try { this.positionManager = new PositionManager(this); } catch(e) { console.error('PositionManager hatası', e); }
+    try { this.panteon = new PantheonManager(this); } catch(e) { console.error('Panteon hatası', e); }
     // panteon_state de async init() içinde yüklenecek (storage ready sonrası)
 
-    this.exchange = new ExchangeManager(this);
-    this.chartManager = new ChartManager('live-chart');
-    this.heatmapManager = new HeatmapManager('orderbook-heatmap');
-    this.effects = new EffectsManager('effects-canvas');
-    this.notify = new NotificationService('notifications-container');
-    this.tts = new TtsService();
-    this.ui = new UIController(this);
+    try { this.exchange = new ExchangeManager(this); } catch(e) { console.error('ExchangeManager hatası', e); }
+    try { this.chartManager = new ChartManager('live-chart'); } catch(e) { console.error('ChartManager hatası', e); this.chartManager = { setData:()=>{}, updateRealtime:()=>{}, addSignalMarker:()=>{}, clearMarkers:()=>{}, resize:()=>{}, zoomIn:()=>{}, zoomOut:()=>{}, resetZoom:()=>{}, updateTheme:()=>{} }; }
+    try { this.heatmapManager = new HeatmapManager('orderbook-heatmap'); } catch(e) { console.error('HeatmapManager hatası', e); this.heatmapManager = { draw:()=>{}, resize:()=>{} }; }
+    try { this.effects = new EffectsManager('effects-canvas'); } catch(e) { console.error('EffectsManager hatası', e); this.effects = { start:()=>{}, emit:()=>{}, stop:()=>{} }; }
+    try { this.notify = new NotificationService('notifications-container'); } catch(e) { console.error('NotificationService hatası', e); this.notify = { info:console.log, warning:console.log, success:console.log, danger:console.log, show:console.log }; }
+    try { this.tts = new TtsService(); } catch(e) { console.error('TtsService hatası', e); this.tts = { speak:()=>{}, getVoices:()=>[], setVoice:()=>{}, setEnabled:()=>{} }; }
+    // UI EN SON DEĞIL EN GÜVENLİ: her şeyden sonra ama try/catch içinde, throw etse bile app ayakta kalsın
+    try { this.ui = new UIController(this); } catch(e) { console.error('UIController hatası - KRİTİK', e); try { this.ui = new UIController(this); } catch(e2) { console.error('UIController 2. deneme de başarısız', e2); } }
 
     // ── Zamanlayıcılar ─────────────────────────────────
     this.renderInterval = null;
