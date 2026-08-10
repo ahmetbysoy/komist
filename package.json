@@ -15,7 +15,8 @@
     "apk:path": "echo 'APK: android/app/build/outputs/apk/debug/app-debug.apk'"
   },
   "dependencies": {
-    "@capacitor/core": "^6.1.2"
+    "@capacitor/core": "^6.1.2",
+    "lightweight-charts": "^3.8.0"
   },
   "devDependencies": {
     "@capacitor/android": "^6.1.2",

@@ -1,23 +1,31 @@
 /**
- * TtsService — Sesli anons (Web Speech tr-TR) + kuyruk
- * Kaynak: UTC v2.0 §18
+ * TtsService — Sesli anons (Web Speech API tr-TR) + kuyruk
+ * Kaynak: barva35.html (speak + processSpeechQueue) — UTC v2.0 §18
  */
-import { CONFIG } from '../core/Config.js';
 import { Logger } from '../core/Logger.js';
 
 export class TtsService {
   constructor() {
     this.queue = [];
     this.isSpeaking = false;
-    this.enabled = CONFIG.voiceAnnounce;
+    this.enabled = true;
+    this.rate = 1.1;
+    this.voice = null;
   }
 
-  setEnabled(on) {
-    this.enabled = on;
+  setEnabled(on) { this.enabled = on; }
+
+  setVoice(voiceURI) {
+    const voices = speechSynthesis?.getVoices?.() || [];
+    this.voice = voices.find((v) => v.voiceURI === voiceURI) || null;
+  }
+
+  getVoices() {
+    return speechSynthesis?.getVoices?.() || [];
   }
 
   speak(text) {
-    if (!this.enabled || typeof speechSynthesis === 'undefined') return;
+    if (!this.enabled || !text || typeof speechSynthesis === 'undefined') return;
     this.queue.push(text);
     if (!this.isSpeaking) this._processQueue();
   }
@@ -29,11 +37,13 @@ export class TtsService {
     try {
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'tr-TR';
-      u.rate = 1.1;
+      u.rate = this.rate;
       u.pitch = 1.0;
-      const voices = speechSynthesis.getVoices?.();
-      const v = voices?.find((x) => x.lang.startsWith('tr'));
-      if (v) u.voice = v;
+      if (this.voice) u.voice = this.voice;
+      else {
+        const v = speechSynthesis.getVoices().find((x) => x.lang.startsWith('tr'));
+        if (v) u.voice = v;
+      }
       u.onend = () => this._processQueue();
       u.onerror = () => this._processQueue();
       speechSynthesis.speak(u);

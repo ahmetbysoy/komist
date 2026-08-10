@@ -1,11 +1,11 @@
 /**
- * PositionManager — TP/SL hesaplama, breakeven, trailing stop
- * Kaynak: UTC v2.0 §6.4-6.5
+ * PositionManager — Dinamik TP/SL + breakeven + trailing stop
+ * Kaynak: barva35.html + UTC v2.0 §6.4-6.5
  *
- *  - ATR bazlı mesafe: atrMultiplier = 1.5 - (min(10,score)/20)
- *  - RR çarpanları: elçi modu, rejim, skor bonusu
- *  - Breakeven: MFE ≥ 0.8R → SL = entry
- *  - Trailing: MFE ≥ 1.5R → SL = current ± ATR×0.5
+ * TP/SL: ATR bazlı; atrMultiplier = 1.5 - (min(10,score)/20)
+ * RR çarpanları: rejim + skor bonusu
+ * Breakeven: MFE ≥ beAtR (0.8R) → SL = entry
+ * Trailing: MFE ≥ trailAfterR (1.5R) → SL = current ± ATR×0.5
  */
 import { CONFIG } from '../core/Config.js';
 import { STATE } from '../core/State.js';
@@ -16,33 +16,35 @@ export class PositionManager {
     this.bot = bot;
   }
 
+  /** ATR (son değer) — fallback fiyat×0.0015 */
+  _currentAtr() {
+    const candles = this.bot.candles;
+    const period = this.bot.settings?.params?.atrPeriod ?? 14;
+    if (candles?.length >= period + 1) {
+      const v = atr(candles, period).at(-1);
+      if (v) return v;
+    }
+    return (STATE.marketData.price || 1) * 0.0015;
+  }
+
   /**
-   * Sinyal için TP/SL seviyelerini hesapla.
-   * @returns {{tp, sl, rr, distance}|null}
+   * Sinyal için TP/SL seviyeleri (barva35 calculateDynamicTpSl)
+   * @param {'buy'|'sell'} direction
+   * @param {number} price
+   * @param {number} score  (1-10)
+   * @param {string} regime 'trend'|'range'|'transition'
    */
-  calculateLevels(direction, price, score) {
+  calculateLevels(direction, price, score, regime = 'transition') {
     if (!price) return null;
 
-    // ATR
-    const candles = this.bot.candles;
-    let atrVal = price * 0.0015;   // fallback
-    if (candles?.length >= 15) {
-      const arr = atr(candles, CONFIG.tpSl.atrPeriod);
-      const v = arr.at(-1);
-      if (v) atrVal = v;
-    }
-
-    // ATR multiplier: score 0 → 1.5, score 10 → 1.0
+    const atrVal = this._currentAtr();
     const atrMult = 1.5 - (Math.min(10, score) / 20);
     const slDist = atrVal * atrMult;
 
-    // RR çarpanı
-    let rr = CONFIG.tpSl.rrRatioBase;
-    const modeMult = this.bot.getModeRRMultiplier?.() ?? 1.0;
-    rr *= modeMult;
-    if (STATE.marketRegime === 'trend') rr *= 1.1;
-    if (STATE.marketRegime === 'range') rr *= 0.95;
-    rr *= 1 + Math.min(0.3, score / 10);
+    let rr = this.bot.settings?.params?.rrRatio ?? 1.5;
+    if (regime === 'trend') rr *= 1.1;
+    if (regime === 'range') rr *= 0.95;
+    rr *= 1 + Math.min(0.3, (score - (this.bot.settings?.confluenceThreshold ?? 3)) / 10);
 
     const tpDist = slDist * rr;
 
@@ -53,46 +55,46 @@ export class PositionManager {
   }
 
   /**
-   * Breakeven + trailing stop güncellemesi (pozisyon bazlı).
-   * @param {object} pos { dir, entry, stop, mfeR }
-   * @param {number} currentPrice
+   * Açık pozisyonları yönet (barva35 manageOpenPositions)
+   * Her ticker/kline güncellemesinde çağrılır.
    */
-  updateStop(pos, currentPrice) {
-    if (!pos || !pos.entry) return pos.stop;
+  manageOpenPositions() {
+    const be = this.bot.settings?.breakeven ?? { beAtR: 0.8, trailAfterR: 1.5, trailToR: 0.5 };
+    const enabled = this.bot.settings?.features?.enableBreakevenTrail;
+    const price = STATE.marketData.price;
+    if (!price || !this.bot.positions?.length) return;
 
-    const risk = Math.abs(pos.entry - pos.stop) || 1;
-    const rNow = pos.dir === 'buy'
-      ? (currentPrice - pos.entry) / risk
-      : (pos.entry - currentPrice) / risk;
-    pos.mfeR = Math.max(pos.mfeR || 0, rNow);
+    for (const pos of this.bot.positions) {
+      if (pos.status !== 'open') continue;
+      const risk = Math.abs(pos.entryPrice - pos.stopLoss) || 1;
+      const rNow = pos.direction === 'buy'
+        ? (price - pos.entryPrice) / risk
+        : (pos.entryPrice - price) / risk;
+      pos.mfeR = Math.max(pos.mfeR || 0, rNow);
 
-    const be = CONFIG.tpSl.breakeven;
-    const tr = CONFIG.tpSl.trailing;
-    if (!be.enabled && !tr.enabled) return pos.stop;
+      if (enabled === false) continue;
 
-    let stop = pos.stop;
-    // Breakeven
-    if (be.enabled && pos.mfeR >= be.beAtR) {
-      stop = pos.dir === 'buy' ? Math.max(stop, pos.entry) : Math.min(stop, pos.entry);
+      // Breakeven
+      if (pos.mfeR >= be.beAtR) {
+        pos.stopLoss = pos.direction === 'buy'
+          ? Math.max(pos.stopLoss, pos.entryPrice)
+          : Math.min(pos.stopLoss, pos.entryPrice);
+      }
+      // Trailing
+      if (pos.mfeR >= be.trailAfterR) {
+        const trail = this._currentAtr() * 0.5;
+        const candidate = pos.direction === 'buy'
+          ? price - trail
+          : price + trail;
+        pos.stopLoss = pos.direction === 'buy'
+          ? Math.max(pos.stopLoss, candidate)
+          : Math.min(pos.stopLoss, candidate);
+        // SL, TP'yi geçemez
+        pos.stopLoss = pos.direction === 'buy'
+          ? Math.min(pos.stopLoss, pos.takeProfit)
+          : Math.max(pos.stopLoss, pos.takeProfit);
+      }
     }
-    // Trailing (yalnız iyileştiriyorsa)
-    if (tr.enabled && pos.mfeR >= tr.trailAfterR) {
-      const trail = this._currentAtr() * 0.5;
-      const candidate = pos.dir === 'buy'
-        ? currentPrice - trail
-        : currentPrice + trail;
-      stop = pos.dir === 'buy' ? Math.max(stop, candidate) : Math.min(stop, candidate);
-    }
-    return stop;
-  }
-
-  _currentAtr() {
-    const candles = this.bot.candles;
-    if (candles?.length >= 15) {
-      const v = atr(candles, CONFIG.tpSl.atrPeriod).at(-1);
-      if (v) return v;
-    }
-    return (STATE.lastPrice || 1) * 0.0015;
   }
 }
 

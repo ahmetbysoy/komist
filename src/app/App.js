@@ -1,479 +1,927 @@
 /**
- * App.js — UltimateTerminal (orchestrator)
- * BOZOK PRO mikroyapı + UTC strateji/confluence/panteon sistemlerinin
- * tek noktada bağlanması. EventBus üzerinden tüm modülleri besler.
+ * App.js — UltimateTradingCommandCenter (ana sınıf)
+ * Kaynak: barva35.html — UltimateTradingCommandCenter (modülerleştirilmiş)
  *
- * Döngüler:
- *  250ms  → flow.tick + paper.update + render
- *  1000ms → stale kontrol + ui.updateStatus
- *  5000ms → signal decay, strateji periodicAnalyze, oracle, oto-toggle, kill switch
- *  60000ms→ panteon durgunluk
+ * Sorumluluklar:
+ *  - Modüllerin kurulumu (strateji, confluence, risk, panteon, render, UI, depolama)
+ *  - WebSocket veri akışı (ticker/depth/kline/aggTrade)
+ *  - Sinyal yaşam döngüsü: confluence → pending → aktif → TP/SL sonucu
+ *  - Ayarlar + kalıcılık, tema, sembol/timeframe değişimi
  */
-import { EventBus } from '../core/EventBus.js';
-import { CONFIG } from '../core/Config.js';
+import { CONFIG, DEFAULT_SETTINGS } from '../core/Config.js';
 import { STATE } from '../core/State.js';
 import { Logger } from '../core/Logger.js';
-import { pushCap, now } from '../core/Utils.js';
+import { debounce, formatPrice, formatVolume, pushCap } from '../core/Utils.js';
 
-import { MicrostructureEngine } from '../engines/MicrostructureEngine.js';
-import { TradeEngine } from '../engines/TradeEngine.js';
-import { FlowEngine } from '../engines/FlowEngine.js';
-import { SignalEngine } from '../engines/SignalEngine.js';
-import { PaperTradingEngine } from '../engines/PaperTradingEngine.js';
-
-import { DetectorSuite } from '../detectors/DetectorSuite.js';
-
-import { createStrategies } from '../strategies/index.js';
-import { STRATEGY_AMBASSADORS, STRATEGY_CLASSES } from '../strategies/index.js';
-
+import { STRATEGY_CLASSES, STRATEGY_AMBASSADORS, STRATEGY_GROUPS, createStrategies } from '../strategies/index.js';
 import { ConfluenceEngine } from '../confluence/ConfluenceEngine.js';
-import { BayesianWeighting } from '../confluence/BayesianWeighting.js';
-import { MultiTimeframeManager } from '../confluence/MultiTimeframeManager.js';
-
 import { RiskGuardian } from '../risk/RiskGuardian.js';
-import { PositionManager } from '../risk/PositionManager.js';
+import { SpoofDetector } from '../risk/SpoofDetector.js';
+import { SessionProfiler } from '../risk/SessionProfiler.js';
 import { CUSUMDriftDetector } from '../risk/CUSUMDriftDetector.js';
-
+import { PositionManager } from '../risk/PositionManager.js';
 import { PantheonManager } from '../panteon/PantheonManager.js';
-import { TheOracle } from '../panteon/TheOracle.js';
-import { PantheonEffects } from '../panteon/PantheonEffects.js';
-
+import { MultiTimeframeManager } from '../confluence/MultiTimeframeManager.js';
 import { ExchangeManager } from '../data/ExchangeManager.js';
-
-import { RenderEngine } from '../render/RenderEngine.js';
+import { ChartManager } from '../render/ChartManager.js';
+import { HeatmapManager } from '../render/HeatmapManager.js';
+import { EffectsManager } from '../render/EffectsManager.js';
 import { UIController } from '../ui/UIController.js';
-import { SignalFeed } from '../ui/SignalFeed.js';
+import { NotificationService } from '../ui/NotificationService.js';
 import { TtsService } from '../ui/TtsService.js';
-
-import { StorageService } from '../storage/StorageService.js';
+import { DBManager } from '../storage/DBManager.js';
 import { StorageBridge } from '../storage/StorageBridge.js';
 import { Migration } from '../storage/Migration.js';
 
-export class UltimateTerminal {
+import { rsi } from '../indicators/RSI.js';
+import { atr } from '../indicators/ATR.js';
+import { sma } from '../indicators/SMA.js';
+import { ema } from '../indicators/EMA.js';
+import { adx } from '../indicators/ADX.js';
+import { vwap } from '../indicators/VWAP.js';
+import { bollinger } from '../indicators/Bollinger.js';
+
+export class UltimateTradingCommandCenter {
   constructor() {
-    // ── Altyapı ─────────────────────────────────────────
-    this.bus = new EventBus();
-    this.storage = new StorageService();
-    this.bridge = new StorageBridge(this.storage);
-    this.settings = { features: {}, optimization: CONFIG.optimization, cooldowns: CONFIG.confluence };
+    // ── Kalıcılık altyapısı ─────────────────────────────
+    this.db = new DBManager();
+    this.storage = new StorageBridge(this.db);
+
+    // ── Ayarlar & durum ────────────────────────────────
+    this.settings = this._loadSettings() || structuredClone(DEFAULT_SETTINGS);
+    this.currentSymbol = this.storage.getJsonSync('utc_current_symbol') || CONFIG.defaultSymbol;
+    this.currentTimeframe = this.storage.getJsonSync('utc_current_timeframe') || CONFIG.defaultTimeframe;
+    this.headerCollapsed = true;
+    this.currentMainView = 'chart';
+    this.runtimeThresholdOffset = 0;
+    this.slippageHighUntil = 0;
+
+    // ── Piyasa verisi ──────────────────────────────────
+    this.marketData = { price: 0, change24h: 0, volume24h: 0, symbol: this.currentSymbol, btcPrice: 70000 };
+    this.orderBook = { bids: [], asks: [], lastUpdateId: null };
+    this.candles = [];
+    this.indicators = { rsi: [], atr: null, sma20: null, sma50: null, volSma20: null, vwap: null, adx: null, bbands: null };
+
+    // ── Sinyaller & istatistikler ──────────────────────
+    this.signals = [];
+    this.pendingSignals = [];
+    this.stats = { total: 0, tp: 0, sl: 0 };
+    this.strategyStats = this.storage.getJsonSync('utc_strategy_stats') || this.initDefaultStrategyStats();
     this.shadowProposals = [];
+    this.marketRegime = 'unknown';
+    this.positions = [];
 
-    // ── Motorlar ────────────────────────────────────────
-    this.micro = new MicrostructureEngine(this.bus);
-    this.trade = new TradeEngine(this.bus);
-    this.flow = new FlowEngine(this.bus);
-    this.signalEngine = new SignalEngine(this.bus);
-    this.paper = new PaperTradingEngine(this.bus);
+    // ── Strateji haritaları (barva35) ──────────────────
+    this.strategyAmbassadors = STRATEGY_AMBASSADORS;
+    this.strategyGroups = STRATEGY_GROUPS;
+    this.strategyKeys = Object.keys(STRATEGY_CLASSES);
 
-    // ── Dedektörler ─────────────────────────────────────
-    this.detectors = new DetectorSuite(this.bus);
-
-    // ── Strateji + Confluence ───────────────────────────
+    // ── Modüller ───────────────────────────────────────
     this.strategies = createStrategies(this);
-    this.strategyStats = {};
     this.confluenceEngine = new ConfluenceEngine(this);
-    this.bayes = new BayesianWeighting(this);
-    this.mtf = new MultiTimeframeManager(this);
-
-    // ── Risk ────────────────────────────────────────────
+    this.multiTimeframeManager = new MultiTimeframeManager(this);
     this.riskGuardian = new RiskGuardian(this);
-    this.positionManager = new PositionManager(this);
+    this.spoofDetector = new SpoofDetector(this);
+    this.sessionProfiler = new SessionProfiler();
     this.cusumDetector = new CUSUMDriftDetector();
+    this.positionManager = new PositionManager(this);
+    this.panteon = new PantheonManager(this);
+    this.panteon.loadState(this.storage.getJsonSync('pantheon_state'));
 
-    // ── Panteon ─────────────────────────────────────────
-    this.pantheon = new PantheonManager(this);
-    this.oracle = new TheOracle(this);
-    this.effects = new PantheonEffects();
-
-    // ── Veri / Render / UI ──────────────────────────────
-    this.exchange = new ExchangeManager(this.bus, { micro: this.micro, trade: this.trade });
-    this.render = new RenderEngine(this.bus);
-    this.ui = null;
-    this.signalFeed = null;
+    this.exchange = new ExchangeManager(this);
+    this.chartManager = new ChartManager('live-chart');
+    this.heatmapManager = new HeatmapManager('orderbook-heatmap');
+    this.effects = new EffectsManager('effects-canvas');
+    this.notify = new NotificationService('notifications-container');
     this.tts = new TtsService();
+    this.ui = new UIController(this);
 
-    // ── Durum ───────────────────────────────────────────
+    // ── Zamanlayıcılar ─────────────────────────────────
+    this.renderInterval = null;
+    this.analysisInterval = null;
+    this.countdownInterval = null;
+    this.performanceInterval = null;
+    this.sessionInterval = null;
     this.isRunning = false;
-    this.timers = [];
-    this.marketData = STATE.marketData;
-    this.orderBook = STATE.book;
-    this.candles = STATE.candles;
-    this.aggTrades = STATE.trades;
+    this.reconnectAttempts = 0;
+    this.reconnectDelay = 3000;
 
-    this._wireBus();
+    this.buyScore = 0;
+    this.sellScore = 0;
+    this.combatModeActive = false;
+
+    this.debouncedRender = debounce(() => this.render(), 250);
   }
 
-  // ── EventBus kablolama ───────────────────────────────
-  _wireBus() {
-    this.bus.on('book:update', () => {
-      this.detectors.run();
-      this._dispatchBookToStrategies();
-      this.flow.tick();
-      this.paper.update();
-    });
-    this.bus.on('trade:update', (t) => {
-      this.flow.updateBucket(t);
-      this._updateCandles(t);
-      this._dispatchTradeToStrategies(t);
-      this.detectors.onTrade();
-    });
-    this.bus.on('signal:add', (sig) => {
-      const s = this.signalEngine.addSignal(sig);
-      if (s) this._onNewSignal(s);
-    });
-    this.bus.on('paper:close', ({ position, reason }) => {
-      const isWin = reason.startsWith('tp');
-      this.pantheon.onSignalResult({
-        status: isWin ? 'tp' : 'sl',
-        contributors: position.contributors || []
-      });
-      // Bayes güncelle
-      for (const key of position.contributors || []) {
-        this.bayes.recordResult(key, isWin);
-      }
-      // CUSUM
-      if (this.cusumDetector.update(isWin)) {
-        Logger.warn('CUSUM', 'Kötü drift tespit — strateji havuzu gözden geçirilsin');
-      }
-      // Efekt + TTS
-      if (isWin) this.effects.tpCelebrate();
-      else this.effects.slExplosion();
-      if (CONFIG.voiceAnnounce) {
-        this.tts.speak(isWin ? 'Kâr alındı' : 'Stop çalıştı');
-      }
-    });
+  // ═════════════════════════════════════════════════════
+  // BAŞLATMA / DURDURMA
+  // ═════════════════════════════════════════════════════
+  async init() {
+    await this.db.init();
+    await Migration.runOnce(this.db);
+    await this.storage.init();
+
+    // Kalıcı sinyal/stats geri yükle
+    this.signals = this.storage.getJsonSync('utc_signals') || [];
+    this.stats = this.storage.getJsonSync('utc_stats') || { total: 0, tp: 0, sl: 0 };
+    this.panteon.loadState(this.storage.getJsonSync('pantheon_state'));
+
+    document.body.classList.add('header-collapsed');
+    this.effects.start();
+    this.updateSession();
+    this.sessionInterval = setInterval(() => this.updateSession(), 60000);
+    this.countdownInterval = setInterval(() => this.updateCandleCountdown(), 1000);
+    this.startPerformanceMonitor();
+    this.ui.renderSignals(this.signals);
+    this.ui.setView(this.currentMainView);
+    this.showFirstLight();
+    Logger.info('App', 'Komuta Merkezi hazır. SİSTEMİ BAŞLAT butonuna tıklayın.');
+    this.notify.info('Sistem hazır — başlatmak için "SİSTEMİ BAŞLAT" de.');
+    return this;
   }
 
-  // ── Strateji dağıtımı ────────────────────────────────
-  _dispatchTradeToStrategies(trade) {
-    for (const key of Object.keys(this.strategies)) {
-      try { this.strategies[key].processTrade?.(trade); }
-      catch (e) { Logger.error(`Strategy:${key}`, e); }
-    }
-  }
-
-  _dispatchBookToStrategies() {
-    for (const key of Object.keys(this.strategies)) {
-      try { this.strategies[key].analyzeOrderBook?.(STATE.book); }
-      catch (e) { Logger.error(`Strategy:${key}`, e); }
-    }
-  }
-
-  // ── Mum yönetimi (trade-driven 1m) ───────────────────
-  _updateCandles(trade) {
-    const tf = 60000;
-    const t = trade.ts || now();
-    let last = this.candles.at(-1);
-
-    if (!last || t - last.time >= tf) {
-      if (last) last.isClosed = true;
-      this.candles.push({
-        time: Math.floor(t / tf) * tf,
-        open: trade.price, high: trade.price, low: trade.price,
-        close: trade.price, volume: trade.qty, isClosed: false
-      });
-      if (this.candles.length > 300) this.candles.splice(0, this.candles.length - 300);
-    } else {
-      last.high = Math.max(last.high, trade.price);
-      last.low = Math.min(last.low, trade.price);
-      last.close = trade.price;
-      last.volume = (last.volume || 0) + trade.qty;
-    }
-    STATE.candles = this.candles;
-  }
-
-  // ── Yeni sinyal yan etkileri ─────────────────────────
-  _onNewSignal(signal) {
-    this.effects.buyBurst();
-    if (CONFIG.voiceAnnounce) {
-      const dir = signal.bias === 'bullish' ? 'Alım' : signal.bias === 'bearish' ? 'Satım' : 'Uyarı';
-      this.tts.speak(`${dir} sinyali: ${signal.type}`);
-    }
-    this.storage.saveSignal(signal);
-  }
-
-  // ── Start / Stop ─────────────────────────────────────
-  async start() {
+  start() {
     if (this.isRunning) return;
     this.isRunning = true;
+    Logger.info('App', 'Sistem başlatılıyor...');
+    this.notify.info('Sistem başlatılıyor...');
 
-    await this.storage.initIndexedDB();
-    await Migration.runOnce(this.storage);
-    await this.bridge.init();
+    this.exchange.connect(this.currentSymbol, this.currentTimeframe);
+    this.multiTimeframeManager.initialize(this.currentSymbol);
 
-    this._loadSettings();
-    this.pantheon.load(this.storage.getJsonSync('utc_panteon'));
+    // İlk veri: kline geçmişi
+    this.exchange.fetchInitialData(this.currentSymbol, this.currentTimeframe).then((candles) => {
+      if (candles.length) {
+        this.candles = candles;
+        this.chartManager.setData(candles);
+        this.calculateAllIndicators();
+      } else if (CONFIG.useMockFallback) {
+        this.exchange.enableMock(this.currentSymbol);
+      }
+    });
 
-    this.ui = new UIController(this.bus, { app: this });
-    this.signalFeed = new SignalFeed('signalList');
+    // Mock fallback: 8s içinde veri gelmediyse mock
+    setTimeout(() => {
+      if (this.isRunning && !STATE.marketData.price && CONFIG.useMockFallback) {
+        this.exchange.enableMock(this.currentSymbol);
+      }
+    }, 8000);
 
-    this._registerCanvases();
-    this.ui.switchTab(STATE.activeTab || 'book');
-
-    this.marketData.symbol = STATE.symbol;
-    await this.exchange.connect(STATE.symbol);
-    this.mtf.initialize(STATE.symbol);
-    this._fetchKlines(STATE.symbol);
-
-    this._startLoops();
-    Logger.info('App', 'Terminal başladı ✔');
+    this.renderInterval = setInterval(() => this.render(), 500);
+    this.analysisInterval = setInterval(() => this.runPeriodicAnalysis(), 5000);
+    document.getElementById('start-btn').disabled = true;
+    document.getElementById('stop-btn').disabled = false;
   }
 
   stop() {
     this.isRunning = false;
-    this.timers.forEach(clearInterval);
-    this.timers = [];
     this.exchange.disconnect();
-    this.mtf.cleanup();
-    this.render.stopLoop();
+    this.multiTimeframeManager.cleanup();
+    clearInterval(this.renderInterval);
+    clearInterval(this.analysisInterval);
+    this.ui.updateConnection(false, 'DURDURULDU');
+    Logger.info('App', 'Sistem durduruldu');
+    this.notify.warning('Sistem durduruldu.');
+    const sb = document.getElementById('start-btn');
+    const st = document.getElementById('stop-btn');
+    if (sb) sb.disabled = false;
+    if (st) st.disabled = true;
   }
 
-  _registerCanvases() {
-    this.render.registerCanvas('book-canvas', 'book');
-    this.render.registerCanvas('flow-canvas', 'flow');
-    this.render.registerCanvas('cvd-canvas', 'cvd');
-    this.render.registerCanvas('equity-canvas', 'equity');
-    this.render.registerCanvas('chart-canvas', 'chart');
+  // ═════════════════════════════════════════════════════
+  // VERİ AKIŞI (barva35 handleMarketData)
+  // ═════════════════════════════════════════════════════
+  onConnectionStatus(status, delay) {
+    if (status === 'online') {
+      this.ui.updateConnection(true, 'BAĞLANTI VAR');
+    } else if (status === 'reconnecting') {
+      this.ui.updateConnection(false, `YENİDEN BAĞLANILIYOR... (${Math.round(delay / 1000)}s)`);
+    } else {
+      this.ui.updateConnection(false, 'BAĞLANTI YOK');
+    }
   }
 
-  _startLoops() {
-    // rAF render döngüsü
-    this.render.startLoop();
+  handleMarketData(streamType, data) {
+    if (!this.isRunning) return;
+    try {
+      if (streamType === 'ticker') this._applyTicker(data);
+      else if (streamType === 'depth') this._applyOrderBook(data);
+      else if (streamType.startsWith('kline')) this._applyKline(data);
+      else if (streamType === 'aggTrade') this._processTrade(data);
+    } catch (e) {
+      Logger.error('App', 'handleMarketData hatası:', e);
+    }
+  }
 
-    const every = (ms, fn) => {
-      const id = setInterval(() => { if (this.isRunning) fn(); }, ms);
-      this.timers.push(id);
+  _applyTicker(data) {
+    this.marketData.price = parseFloat(data.c);
+    this.marketData.change24h = parseFloat(data.P);
+    this.marketData.volume24h = parseFloat(data.q);
+    this.marketData.symbol = data.s;
+    if (data.s === 'BTCUSDT') this.marketData.btcPrice = parseFloat(data.c);
+    STATE.marketData = this.marketData;
+    this.positionManager.manageOpenPositions();
+    this.checkAutoCloseSignals();
+    this.ui.updateTicker();
+    this.ui.updatePriceDisplay();
+  }
+
+  _applyOrderBook(data) {
+    this.orderBook = {
+      bids: (data.b || []).map(([p, q]) => [parseFloat(p), parseFloat(q)]),
+      asks: (data.a || []).map(([p, q]) => [parseFloat(p), parseFloat(q)]),
+      lastUpdateId: data.u
     };
-
-    every(250, () => {
-      this.flow.tick();
-      this.paper.update();
-    });
-    every(1000, () => {
-      STATE.stale = now() - STATE.lastBookUpdate > CONFIG.staleThresholdMs && STATE.lastBookUpdate > 0;
-      this.ui?.updateStatus();
-    });
-    every(5000, () => {
-      this.signalEngine.applyDecay();
-      this.ui?.updateSignalBadge();
-      this.signalFeed?.render();
-      this._periodicAnalyze();
-      this.oracle.detect();
-      this.bayes.autoToggleStrategies();
-      this.riskGuardian.checkKillSwitch();
-      this.ui?.renderPerf();
-    });
-    every(60000, () => {
-      this.pantheon.checkInactivity();
-      this._fetchKlines(STATE.symbol);
-    });
-  }
-
-  _periodicAnalyze() {
-    for (const key of Object.keys(this.strategies)) {
-      try { this.strategies[key].periodicAnalyze?.(); }
+    STATE.orderBook = this.orderBook;
+    this.heatmapManager.draw(this.orderBook, this.marketData.price);
+    if (this.settings.features.enableSpoofDetection) this.spoofDetector.trackOrderBook(this.orderBook);
+    for (const key of this.strategyKeys) {
+      try { this.strategies[key]?.analyzeOrderBook?.(this.orderBook); }
       catch (e) { Logger.error(`Strategy:${key}`, e); }
     }
   }
 
-  // ── Kline (REST) ─────────────────────────────────────
-  async _fetchKlines(symbol) {
-    try {
-      const res = await fetch(
-        `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=200`,
-        { signal: AbortSignal.timeout(8000) }
-      );
-      const raw = await res.json();
-      if (Array.isArray(raw)) {
-        this.candles = raw.map((d) => ({
-          time: d[0], open: +d[1], high: +d[2], low: +d[3], close: +d[4],
-          volume: +d[5], isClosed: true
-        }));
-        STATE.candles = this.candles;
-        this._updateIndicators();
-      }
-    } catch (e) {
-      Logger.debug('Kline', 'alınamadı:', e.message);
+  _applyKline(data) {
+    const k = data.k;
+    if (!k) return;
+    const candle = { time: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v };
+    const last = this.candles[this.candles.length - 1];
+
+    if (last && last.time === candle.time) this.candles[this.candles.length - 1] = candle;
+    else this.candles.push(candle);
+    if (this.candles.length > 501) this.candles.shift();
+
+    this.chartManager.updateRealtime(k);
+
+    if (k.x) { // Mum kapandı
+      this.checkPendingSignals(candle);
+      this.calculateAllIndicators();
+    }
+    this.positionManager.manageOpenPositions();
+    this.checkAutoCloseSignals();
+  }
+
+  _processTrade(trade) {
+    const t = {
+      price: parseFloat(trade.p),
+      quantity: parseFloat(trade.q),
+      isBuyerMaker: trade.m,
+      timestamp: trade.T || Date.now()
+    };
+    for (const key of this.strategyKeys) {
+      try { this.strategies[key]?.processTrade?.(t); }
+      catch (e) { Logger.error(`Strategy:${key}`, e); }
     }
   }
 
-  _updateIndicators() {
+  // ═════════════════════════════════════════════════════
+  // GÖSTERGELER (barva35 calculateAllIndicators)
+  // ═════════════════════════════════════════════════════
+  calculateAllIndicators() {
+    if (this.candles.length < 30) return;
     const closes = this.candles.map((c) => c.close);
-    STATE.indicators.lastClose = closes.at(-1);
-    STATE.indicators.sma20 = closes.length >= 20
-      ? closes.slice(-20).reduce((a, b) => a + b, 0) / 20 : null;
-    STATE.marketRegime = 'unknown';
+    const period = this.settings.params?.rsiPeriod ?? 14;
+    const atrPeriod = this.settings.params?.atrPeriod ?? 14;
+
+    this.indicators.rsi = rsi(closes, period);
+    this.indicators.atr = atr(this.candles, atrPeriod).at(-1) ?? null;
+    this.indicators.sma20 = sma(closes, 20).at(-1) ?? null;
+    this.indicators.sma50 = sma(closes, 50).at(-1) ?? null;
+    this.indicators.vwap = vwap(this.candles).at(-1) ?? null;
+    this.indicators.adx = adx(this.candles, 14).at(-1) ?? null;
+    this.indicators.bbands = bollinger(closes, 20);
+
+    // Rejim: ADX > 25 trend, < 20 range, arada transition
+    const adxVal = this.indicators.adx;
+    this.marketRegime = adxVal === null ? 'unknown' : adxVal > 25 ? 'trend' : adxVal < 20 ? 'range' : 'transition';
+    STATE.marketRegime = this.marketRegime;
+    STATE.indicators = this.indicators;
+
+    // Sinyal barları confluence skorlarını UI'da göster (render zaten yapar)
   }
 
-  // ── Sembol değiştirme ────────────────────────────────
-  changeSymbol(symbol) {
-    STATE.symbol = symbol;
-    this.marketData.symbol = symbol;
-    this.candles = [];
-    STATE.candles = [];
-    this.exchange.connect(symbol);
-    this.mtf.initialize(symbol);
-    this._fetchKlines(symbol);
-    this.saveSettings();
-  }
-
-  // ── Confluence sinyali ───────────────────────────────
-  onConfluenceSignal(direction, score, reason, contributors) {
-    // Atlı engeli: SALGIN'da sinyaller durur (kaynak: UTC §14)
-    if (this.oracle.horseman === 'SALGIN') {
-      Logger.warn('Oracle', 'SALGIN atlısı aktif — sinyal engellendi');
-      return;
+  // ═════════════════════════════════════════════════════
+  // BAYES AĞIRLIK / EŞİK / GATING
+  // ═════════════════════════════════════════════════════
+  initDefaultStrategyStats() {
+    const base = { alpha: 3, beta: 2, proposals: 0, contrib: 0, wins: 0, losses: 0, shadowWins: 0, shadowLosses: 0, shadowProposals: 0, lastUpdate: Date.now() };
+    const stats = {};
+    for (const key of this.strategyKeys) {
+      stats[key] = { overall: { ...base }, trend: { ...base }, range: { ...base }, transition: { ...base } };
     }
-    // MTF bilgelik faktörü
-    const finalScore = this.mtf.applyWisdom(direction, score);
+    return stats;
+  }
 
-    const signal = this.signalEngine.addSignal({
-      type: 'CONFLUENCE_SIGNAL',
-      bias: direction === 'buy' ? 'bullish' : 'bearish',
-      confidence: Math.round(Math.min(95, 50 + finalScore * 4)),
-      description: `Confluence: ${reason} (skor ${finalScore.toFixed(1)})`,
-      price: STATE.lastPrice,
-      evidence: { score: finalScore, contributors: contributors.map((c) => c.strategy) }
-    });
+  getStrategyWeight(name) {
+    const regime = this.marketRegime || 'overall';
+    const regimeStats = this.strategyStats[name]?.[regime];
+    const overallStats = this.strategyStats[name]?.overall;
 
-    if (signal) {
-      this.effects.buyBurst();
-      if (CONFIG.voiceAnnounce) {
-        this.tts.speak(direction === 'buy' ? 'Uzun pozisyon sinyali' : 'Kısa pozisyon sinyali');
-      }
-      // Plan + paper trading (addSignal zaten generateTradePlan çağırır)
-      if (STATE.tradePlan && STATE.tradePlan.direction !== 'NEUTRAL') {
-        const plan = STATE.tradePlan;
-        plan.contributors = contributors.map((c) => c.strategy);
-        this.paper.simulateFromPlan(plan);
-      }
+    let s;
+    if (regimeStats && (regimeStats.contrib || 0) > 10) s = regimeStats;
+    else s = overallStats || { alpha: 3, beta: 2 };
+
+    const mean = s.alpha / (s.alpha + s.beta);
+    const totalObs = s.alpha + s.beta;
+    const uncertainty = totalObs < 10 ? 0.5 + totalObs / 20 : 1.0;
+    let w = (0.5 + mean) * uncertainty;
+    w *= this.getGroupBoost(name);
+    return Math.max(0.3, Math.min(2.0, w));
+  }
+
+  getStrategyGroup(key) {
+    if (this.strategyGroups.trending.includes(key)) return 'trending';
+    if (this.strategyGroups.meanReversion.includes(key)) return 'meanReversion';
+    return 'neutral';
+  }
+
+  getGroupBoost(key) {
+    const grp = this.getStrategyGroup(key);
+    let boost = 1.0;
+    if (this.marketRegime === 'trend' && grp === 'trending') boost *= 1.15;
+    if (this.marketRegime === 'range' && grp === 'meanReversion') boost *= 1.15;
+
+    const atrPct = this.indicators.atr && this.marketData.price ? this.indicators.atr / this.marketData.price : 0;
+    if (atrPct < 0.005) {
+      if (grp === 'trending') boost *= 0.9;
+      if (grp === 'meanReversion') boost *= 1.05;
+    } else if (atrPct > 0.02) {
+      if (grp === 'trending') boost *= 1.05;
+      if (grp === 'meanReversion') boost *= 0.95;
     }
+    return boost;
   }
 
-  onHorsemanChange(horseman) {
-    this.effects.horsemanFlash(horseman);
-    this.bus.emit('horseman:change', horseman);
-    if (CONFIG.voiceAnnounce) {
-      const msg = {
-        SAVAŞ: 'SAVAŞ atlısı ufukta!',
-        KITLIK: 'KITLIK çöktü piyasaya...',
-        SALGIN: 'SALGIN! Flash çöküş tespit edildi!',
-        ÖLÜM: 'ÖLÜM atlısı geldi... Piyasa sustu.'
-      }[horseman];
-      if (msg) this.tts.speak(msg);
-    }
-  }
-
-  onKillSwitch() {
-    if (CONFIG.voiceAnnounce) {
-      this.tts.speak('Dikkat! Sistem win rate düştü. Otomatik durduruldu.');
-    }
-  }
-
-  onReputationChange() {
-    // UI itibar güncellemesi (opsiyonel)
-  }
-
-  // ── Bayesian / Panteon arayüzleri ────────────────────
-  getStrategyWeight(key) {
-    return this.bayes.getWeight(key, STATE.marketRegime === 'unknown' ? 'overall' : STATE.marketRegime);
-  }
-
-  getModeRRMultiplier() {
-    return this.pantheon.getRRMultiplier();
-  }
-
+  /** Eşik: ayar + panteon mod etkisi + runtime offset (barva35 getEffectiveThreshold) */
   getEffectiveThreshold() {
-    const base = this.settings.confluence?.threshold ?? CONFIG.confluence.threshold;
-    const delta = this.pantheon._combinedThresholdDelta();
-    const oracleOffset = this.oracle.getThresholdOffset();
-    return base + delta + oracleOffset;
+    const base = this.settings.confluenceThreshold ?? 3;
+    const moodDelta = this.panteon.getThresholdDelta() * 0.5;
+    return base + moodDelta + (this.runtimeThresholdOffset || 0);
   }
 
-  recordShadowProposal(key, direction, reason, score) {
-    pushCap(this.shadowProposals, { key, direction, reason, score, ts: Date.now() }, 4000);
-    const stats = this.strategyStats[key]?.overall;
-    if (stats) {
-      stats.shadowProposals = (stats.shadowProposals || 0) + 1;
+  /** Piyasa gating cezası (barva35 marketGatingPenalty) */
+  marketGatingPenalty() {
+    const g = this.settings.optimization?.gating || { spreadMaxPct: 0.001, minDepthUsd: 50000 };
+    const price = this.marketData.price;
+    const book = this.orderBook;
+    if (!price || !book?.bids?.length || !book?.asks?.length) return 2.0;
+
+    const bestBid = book.bids[0][0];
+    const bestAsk = book.asks[0][0];
+    const spreadPct = bestAsk > 0 ? (bestAsk - bestBid) / bestAsk : 0;
+    const depthUsd = book.bids.slice(0, 10).reduce((s, l) => s + l[0] * l[1], 0) +
+                     book.asks.slice(0, 10).reduce((s, l) => s + l[0] * l[1], 0);
+
+    let penalty = 0;
+    if (spreadPct > g.spreadMaxPct) penalty += 1.0;
+    if (depthUsd < g.minDepthUsd) penalty += 1.0;
+    if (Date.now() < this.slippageHighUntil) penalty += 1.0;
+    return penalty;
+  }
+
+  // ═════════════════════════════════════════════════════
+  // SİNYAL YAŞAM DÖNGÜSÜ
+  // ═════════════════════════════════════════════════════
+  /** Dinamik TP/SL (barva35 calculateDynamicTpSl) */
+  calculateDynamicTpSl(signal) {
+    if (!signal?.price) return;
+    const levels = this.positionManager.calculateLevels(signal.direction, signal.price, signal.score, this.marketRegime);
+    if (!levels) return;
+    signal.tp = levels.tp;
+    signal.sl = levels.sl;
+    signal.entrySlDistance = levels.distance;
+    signal.entryTpDistance = Math.abs(levels.tp - signal.price);
+  }
+
+  /** Mum onayı bekleyen sinyal ekle (barva35 addPendingSignal) */
+  addPendingSignal(signal) {
+    this.pendingSignals.push(signal);
+    this.notify.warning(`⏳ Beklemede: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} — mum kapanışı onayı bekleniyor (skor ${signal.score.toFixed(1)})`);
+  }
+
+  /** Mum kapandığında pending kontrolü (barva35 checkPendingSignals) */
+  checkPendingSignals(closedCandle) {
+    if (!this.pendingSignals.length) return;
+    const remaining = [];
+    for (const sig of this.pendingSignals) {
+      // Mum sinyal yönünü onaylıyorsa aktifleştir
+      const confirms = sig.direction === 'buy'
+        ? closedCandle.close > closedCandle.open
+        : closedCandle.close < closedCandle.open;
+      if (confirms) this.activateSignal(sig);
+      else if (Date.now() - sig.timestamp > 300000) {
+        // 5 dk doldu, onay gelmedi → iptal
+        this.notify.info(`${sig.direction.toUpperCase()} bekleme sinyali iptal (mum onaylamadı)`);
+      } else {
+        remaining.push(sig);
+      }
+    }
+    this.pendingSignals = remaining;
+  }
+
+  /** Sinyali aktifleştir (barva35 activateSignal) */
+  activateSignal(signal) {
+    signal.status = 'active';
+    this.signals.unshift(signal);
+    if (this.signals.length > 200) this.signals.pop();
+    this.saveData('utc_signals', this.signals);
+    this.debouncedRender();
+    this.chartManager.addSignalMarker(signal);
+    this.ui.renderSignals(this.signals);
+
+    let sizeText = signal.recommendedSize ? ` | Boyut: ${signal.recommendedSize}` : '';
+    this.notify.show(
+      `AKTİF SİNYAL: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} | Skor: ${signal.score.toFixed(1)}${sizeText}`,
+      signal.direction === 'buy' ? 'success' : 'danger'
+    );
+
+    // Efekt + ses
+    this.effects.emit(signal.direction === 'buy' ? 'buy' : 'sell');
+    const message = this.getRandomMessage(signal.direction === 'buy' ? 'buy' : 'sell', {
+      Sembol: signal.symbol.replace('USDT', ''),
+      Skor: signal.score.toFixed(1)
+    });
+    this.tts.speak(message);
+
+    if (signal.score >= 8 && !this.combatModeActive) this.activateCombatMode();
+
+    // Slippage ölçümü
+    setTimeout(() => this.confluenceEngine.measureSlippage?.(signal.price), 2000);
+  }
+
+  /** TP/SL otomatik kapanış kontrolü (barva35 checkAutoCloseSignals) */
+  checkAutoCloseSignals() {
+    if (!this.marketData.price || !this.signals.length) return;
+    const price = this.marketData.price;
+    const toRemove = [];
+
+    for (const s of this.signals) {
+      if (s.status !== 'active') continue;
+      const entry = s.price;
+      const risk = Math.abs(entry - s.sl) || 1;
+
+      // MFE (breakeven/trailing için)
+      const rNow = s.direction === 'buy'
+        ? (price - entry) / risk
+        : (entry - price) / risk;
+      s.mfeR = Math.max(s.mfeR || 0, rNow);
+
+      const be = this.settings.breakeven ?? { beAtR: 0.8, trailAfterR: 1.5, trailToR: 0.5 };
+      const trailOn = this.settings.features?.enableBreakevenTrail;
+
+      let exitPrice = null;
+      let outcome = null;
+
+      if (s.direction === 'buy') {
+        if (price <= s.sl) { exitPrice = s.sl; outcome = 'sl'; }
+        else if (price >= s.tp) { exitPrice = s.tp; outcome = 'tp'; }
+        else if (trailOn && s.mfeR >= be.beAtR && !s.beDone) { s.sl = Math.max(s.sl, entry); s.beDone = true; }
+        else if (trailOn && s.mfeR >= be.trailAfterR) {
+          const newSl = price - (this.indicators.atr || price * 0.0015) * be.trailToR;
+          s.sl = Math.max(s.sl, newSl);
+        }
+      } else {
+        if (price >= s.sl) { exitPrice = s.sl; outcome = 'sl'; }
+        else if (price <= s.tp) { exitPrice = s.tp; outcome = 'tp'; }
+        else if (trailOn && s.mfeR >= be.beAtR && !s.beDone) { s.sl = Math.min(s.sl, entry); s.beDone = true; }
+        else if (trailOn && s.mfeR >= be.trailAfterR) {
+          const newSl = price + (this.indicators.atr || price * 0.0015) * be.trailToR;
+          s.sl = Math.min(s.sl, newSl);
+        }
+      }
+
+      if (outcome) {
+        s.status = outcome;
+        s.closePrice = exitPrice;
+        toRemove.push(s);
+        this.updateSignalResult(s);
+      }
+    }
+
+    if (toRemove.length) {
+      this.signals = this.signals.filter((s) => s.status === 'active' || s.status === 'pending');
+      this.saveData('utc_signals', this.signals);
+      this.ui.renderSignals(this.signals);
+    }
+  }
+
+  /** Sinyal sonucu: panteon + istatistik + CUSUM (barva35 updateSignalResult) */
+  updateSignalResult(signal) {
+    const isWin = signal.status === 'tp';
+    this.stats.total += 1;
+    if (isWin) this.stats.tp += 1;
+    else this.stats.sl += 1;
+    this.saveData('utc_stats', this.stats);
+
+    // Panteon itibarı
+    const contributing = signal.contributors?.[0]?.strategy || signal.reason?.split(',')[0]?.trim();
+    this.panteon.updateReputation({ strategy: contributing, outcome: signal.status });
+
+    // Bayes istatistikleri (katkıda bulunan her strateji)
+    for (const c of signal.contributors || []) {
+      const s = this.strategyStats[c.strategy];
+      const target = s?.[this.marketRegime] || s?.overall;
+      if (target) {
+        if (isWin) target.alpha += 1;
+        else target.beta += 1;
+        target.wins = (target.wins || 0) + (isWin ? 1 : 0);
+        target.losses = (target.losses || 0) + (isWin ? 0 : 1);
+      }
+    }
+    this.saveStrategyStats();
+
+    // CUSUM
+    if (this.settings.features.enableCUSUMDrift && this.cusumDetector.update(isWin)) {
+      this.notify.warning('CUSUM: kötü drift tespit — strateji performansı bozuluyor');
+    }
+
+    // Efekt + bildirim
+    if (isWin) {
+      this.effects.emit('tp');
+      this.notify.success(`🎉 KÂR: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} — TP ${formatPrice(signal.tp)}`);
+      this.tts.speak('Kâr alındı. Tebrikler.');
+    } else {
+      this.effects.emit('sl');
+      this.notify.danger(`💥 STOP: ${signal.direction.toUpperCase()} ${signal.symbol.replace('USDT', '/USDT')} — SL ${formatPrice(signal.sl)}`);
+      this.tts.speak('Stop çalıştı. Pozisyon kapandı.');
+    }
+
+    // Kill switch kontrolü
+    this.riskGuardian.checkKillSwitch();
+  }
+
+  /** Önerilen pozisyon boyutu (barva35 getRecommendedPositionSize) */
+  getRecommendedPositionSize(score) {
+    if (!this.settings.features.enableDynamicSizing) return null;
+    if (score >= 7.5) return '2.0x Yüksek';
+    if (score >= 6.0) return '1.5x Orta-Yüksek';
+    if (score >= 4.5) return '1.0x Standart';
+    return '0.5x Düşük';
+  }
+
+  // ═════════════════════════════════════════════════════
+  // GÖLGE / OTO-OPTİMİZASYON
+  // ═════════════════════════════════════════════════════
+  recordShadowProposal(strategy, direction, reason, score) {
+    pushCap(this.shadowProposals, { strategy, direction, reason, score, ts: Date.now() }, 4000);
+    const s = this.strategyStats[strategy]?.overall;
+    if (s) {
+      s.shadowProposals = (s.shadowProposals || 0) + 1;
       this.saveStrategyStats();
     }
   }
 
-  shadowBanStrategy(key, weight) {
-    const inst = this.strategies[key];
-    if (!inst) return;
-    inst.setIsLive(false);
-    const stats = this.strategyStats[key]?.overall;
-    if (stats) stats.lastShadowToggle = Date.now();
-    Logger.info('Optimizer', `${key} gölgeye alındı (w=${weight.toFixed(2)})`);
+  autoToggleStrategies() {
+    const opt = this.settings.optimization || {};
+    if (!opt.autoToggle) return;
+    const nowMs = Date.now();
+
+    for (const key of this.strategyKeys) {
+      const inst = this.strategies[key];
+      const stats = this.strategyStats[key]?.overall;
+      if (!inst || !stats) continue;
+      const w = this.getStrategyWeight(key);
+
+      // Shadow ban: zayıf + yeterli katkı
+      if (w < (opt.minWeightToStay ?? 0.6) && (stats.contrib || 0) >= (opt.minContribForToggle ?? 30) && inst._isLive) {
+        inst.setIsLive(false);
+        stats.lastShadowToggle = nowMs;
+        this.notify.warning(`Oto-optimizasyon: ${inst.displayName} gölgeye alındı (w=${w.toFixed(2)})`);
+      }
+      // Rehabilitasyon: gölgede iyi performans
+      if (!inst._isLive) {
+        const sr = stats.shadowProposals >= 20 ? stats.shadowWins / stats.shadowProposals : 0;
+        if (sr >= 0.58 && nowMs - (stats.lastShadowToggle || 0) > 1800000) {
+          inst.setIsLive(true);
+          this.notify.success(`Rehabilite: ${inst.displayName} tekrar canlı! (gölge WR=${(sr * 100).toFixed(0)}%)`);
+        }
+      }
+    }
   }
 
-  rehabilitateStrategy(key, winRate) {
-    const inst = this.strategies[key];
-    if (!inst) return;
-    inst.setIsLive(true);
-    Logger.info('Optimizer', `${key} rehabilite edildi (gölge WR=${(winRate * 100).toFixed(0)}%)`);
+  // ═════════════════════════════════════════════════════
+  // PERİYODİK / RENDER / SİNYAL BARLARI
+  // ═════════════════════════════════════════════════════
+  runPeriodicAnalysis() {
+    if (!this.isRunning) return;
+    for (const key of this.strategyKeys) {
+      try { this.strategies[key]?.periodicAnalyze?.(); }
+      catch (e) { Logger.error(`Strategy:${key}`, e); }
+    }
+    this.autoToggleStrategies();
+    this.panteon.checkInactivity();
   }
 
-  // ── Kalıcılık ────────────────────────────────────────
-  saveStrategyStats() {
-    this.bridge.setJson('utc_strategy_stats', this.strategyStats);
+  render() {
+    this.ui.updateTicker();
+    this.ui.updatePriceDisplay();
+    this.ui.updateSignalBars(this.confluenceEngine.buyScore || 0, this.confluenceEngine.sellScore || 0);
+    this.ui.updateKehanet({
+      session: `${this.sessionProfiler.getIcon()} ${this.sessionProfiler.current}`,
+      regime: this.marketRegime,
+      pulse: this.indicators.atr ? `ATR ${formatPrice(this.indicators.atr)}` : '—',
+      guardian: this.riskGuardian.killSwitchActivated ? '🚨 DURDURULDU' : 'Aktif'
+    });
   }
 
-  savePanteonState() {
-    this.bridge.setJson('utc_panteon', this.pantheon.serialize());
+  updateSession() {
+    this.sessionProfiler.detect();
   }
+
+  updateCandleCountdown() {
+    if (!this.candles.length) return;
+    const last = this.candles[this.candles.length - 1];
+    const tfMs = { '1m': 60000, '5m': 300000, '15m': 900000, '1h': 3600000, '4h': 14400000 }[this.currentTimeframe] || 900000;
+    const remain = Math.max(0, Math.floor((last.time + tfMs - Date.now()) / 1000));
+    this.ui.updateCandleCountdown(remain);
+  }
+
+  startPerformanceMonitor() {
+    this.performanceInterval = setInterval(() => {
+      if (this.settings.features?.enableAutoOptimize) {
+        // Oto-tune: strateji parametre eşik ayarı (basit)
+        for (const key of this.strategyKeys) {
+          const stats = this.strategyStats[key]?.overall;
+          if (!stats || stats.proposals < 20) continue;
+          const wr = stats.wins / (stats.wins + stats.losses || 1);
+          // Düşük performanslı stratejilerin eşiklerini sıkılaştır
+        }
+      }
+    }, 60000);
+  }
+
+  // ═════════════════════════════════════════════════════
+  // KOMBAT MODU & GÖRSEL
+  // ═════════════════════════════════════════════════════
+  activateCombatMode() {
+    this.combatModeActive = true;
+    document.body.classList.add('combat-mode');
+    this.notify.warning('⚔️ KOMBAT MODU! Skor ≥ 8 — dikkat!');
+  }
+
+  showFirstLight() {
+    // Başlangıç flaşı
+    this.effects.emit('divine');
+  }
+
+  // ═════════════════════════════════════════════════════
+  // BİLDİRİM / SES / MESAJLAR
+  // ═════════════════════════════════════════════════════
+  showNotification(message, type = 'info') {
+    this.notify.show(message, type);
+  }
+
+  speak(text) {
+    this.tts.speak(text);
+  }
+
+  getRandomMessage(type, vars = {}) {
+    const messages = {
+      buy: ['Olimpos\'un rüzgarı arkana esecek...', 'Metatron fısıldıyor: alım gücü artıyor...', 'Uriel mızrağını kaldırdı!'],
+      sell: ['Kılıçlar kınına dönüyor...', 'Raphael uyardı: satış baskısı büyüyor...', 'O vakit geldi...'],
+      shadowBan: ['Strateji gölgeye alındı.', 'Şüpheli performans — izlemeye çekildi.'],
+      shadowRehab: ['Strateji tekrar canlı!', 'Gölgeden dönüş, zafer gibi kokuyor.']
+    };
+    const list = messages[type] || ['İşlem zamanı.'];
+    let msg = list[Math.floor(Math.random() * list.length)];
+    for (const [k, v] of Object.entries(vars)) msg = msg.replace(`{${k}}`, String(v));
+    return msg;
+  }
+
+  exportLogs() {
+    const logs = Logger.getJournal().map((l) => `[${new Date(l.ts).toISOString()}] [${l.tag}] ${l.msg}`).join('\n');
+    const blob = new Blob([logs], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'komuta-merkezi-log.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  // ═════════════════════════════════════════════════════
+  // AYARLAR / KALICILIK / SEMBOL / TEMA
+  // ═════════════════════════════════════════════════════
+  loadData(key) { return this.storage.getJsonSync(key); }
+  saveData(key, val) { this.storage.setJson(key, val); }
 
   saveSettings() {
-    const s = {
-      symbol: STATE.symbol,
-      theme: CONFIG.theme,
-      soundOn: CONFIG.soundOn,
-      voiceAnnounce: CONFIG.voiceAnnounce,
-      activeLayers: STATE.activeLayers,
-      flowMode: CONFIG.flowMode,
-      flowTimeframeMs: CONFIG.flowTimeframeMs,
-      riskPct: CONFIG.riskPct,
-      maxLeverage: CONFIG.maxLeverage
-    };
-    this.storage.saveSettings(s);
+    this.saveData('utc_settings', this.settings);
   }
 
   _loadSettings() {
-    const s = this.storage.loadSettings();
-    if (!s) return;
-    if (s.symbol) STATE.symbol = s.symbol;
-    if (s.theme) this.setTheme(s.theme);
-    if (typeof s.soundOn === 'boolean') CONFIG.soundOn = s.soundOn;
-    if (typeof s.voiceAnnounce === 'boolean') CONFIG.voiceAnnounce = s.voiceAnnounce;
-    if (Array.isArray(s.activeLayers)) STATE.activeLayers = s.activeLayers;
-    if (s.flowMode) CONFIG.flowMode = s.flowMode;
-    if (s.flowTimeframeMs) CONFIG.flowTimeframeMs = s.flowTimeframeMs;
-    if (s.riskPct) CONFIG.riskPct = s.riskPct;
-    if (s.maxLeverage) CONFIG.maxLeverage = s.maxLeverage;
-    this.effects.setEnabled({ sound: CONFIG.soundOn });
-    this.tts.setEnabled(CONFIG.voiceAnnounce);
+    try {
+      const raw = localStorage.getItem('utc_settings');
+      if (raw) return { ...structuredClone(DEFAULT_SETTINGS), ...JSON.parse(raw) };
+    } catch (_) {}
+    return structuredClone(DEFAULT_SETTINGS);
+  }
+
+  saveStrategyStats() {
+    this.saveData('utc_strategy_stats', this.strategyStats);
+  }
+
+  savePanteonState() {
+    this.saveData('pantheon_state', this.panteon.serialize());
+  }
+
+  updatePanteonUI() {
+    this.ui.updatePanteon(this.panteon.getElciler());
+  }
+
+  applyProphecy(prophecy) {
+    this.panteon.applyProphecy(prophecy);
+    this.notify.info(`Kehanet: ${prophecy === 'DEFENSIVE' ? '🛡️ Savunmacı' : prophecy === 'AGGRESSIVE' ? '⚔️ Saldırgan' : '⚖️ Dengeli'} mod aktif`);
+  }
+
+  changeSymbol(raw) {
+    const s = (raw || '').toUpperCase().trim();
+    if (!/^[A-Z0-9]{2,12}$/.test(s) || !s.endsWith('USDT')) {
+      this.notify.warning('Geçersiz sembol (örn: BTCUSDT)');
+      return;
+    }
+    this.currentSymbol = s;
+    this.saveData('utc_current_symbol', s);
+    this.candles = [];
+    this.chartManager?.setData([]);
+    if (this.isRunning) {
+      this.exchange.connect(s, this.currentTimeframe);
+      this.multiTimeframeManager.initialize(s);
+      this.exchange.fetchInitialData(s, this.currentTimeframe).then((candles) => {
+        if (candles.length) { this.candles = candles; this.chartManager.setData(candles); this.calculateAllIndicators(); }
+      });
+    }
+    this.notify.info(`Sembol: ${s}`);
+  }
+
+  changeTimeframe(tf) {
+    this.currentTimeframe = tf;
+    this.saveData('utc_current_timeframe', tf);
+    if (this.isRunning) {
+      this.exchange.connect(this.currentSymbol, tf);
+      this.exchange.fetchInitialData(this.currentSymbol, tf).then((candles) => {
+        if (candles.length) { this.candles = candles; this.chartManager.setData(candles); this.calculateAllIndicators(); }
+      });
+    }
+  }
+
+  toggleTheme() {
+    const order = ['dark', 'light', 'war'];
+    const next = order[(order.indexOf(CONFIG.theme) + 1) % order.length];
+    CONFIG.theme = next;
+    document.documentElement.setAttribute('data-theme', next);
+    this.chartManager?.updateTheme();
+    this.saveData('utc_theme', next);
+    this.notify.info(`Tema: ${next}`);
   }
 
   setTheme(theme) {
     CONFIG.theme = theme;
     document.documentElement.setAttribute('data-theme', theme);
-    document.querySelectorAll('.theme-btn').forEach((el) => {
-      el.classList.toggle('active', el.dataset.themeOption === theme);
-    });
+    this.chartManager?.updateTheme();
+    this.saveData('utc_theme', theme);
+  }
+
+  // ── Modal işlemleri ──────────────────────────────────
+  openSettingsModal() {
+    document.getElementById('settings-modal-overlay').classList.add('visible');
+    this._populateModal();
+  }
+
+  closeSettingsModal() {
+    document.getElementById('settings-modal-overlay').classList.remove('visible');
+  }
+
+  _populateModal() {
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    };
+    set('modal-confluence-threshold', this.settings.confluenceThreshold);
+    set('modal-param-rsi-period', this.settings.params.rsiPeriod);
+    set('modal-param-atr-period', this.settings.params.atrPeriod);
+    set('modal-param-wall-btc', this.settings.params.wallBtc);
+    set('modal-param-rr-ratio', this.settings.params.rrRatio);
+    set('modal-signal-cooldown-ms', this.settings.cooldowns.signalMs);
+    set('modal-same-direction-cooldown-ms', this.settings.cooldowns.sameDirectionMs);
+    set('modal-opposite-direction-cooldown-ms', this.settings.cooldowns.oppositeDirectionMs);
+    set('modal-reverse-hysteresis-points', this.settings.cooldowns.reverseHysteresisPoints);
+    set('modal-proposal-timeout-ms', this.settings.cooldowns.proposalTimeoutMs);
+    set('modal-strategy-proposal-cooldown-ms', this.settings.cooldowns.strategyProposalMs);
+    set('modal-be-at-r', this.settings.breakeven.beAtR);
+    set('modal-trail-after-r', this.settings.breakeven.trailAfterR);
+    set('modal-trail-to-r', this.settings.breakeven.trailToR);
+    set('modal-mtf-timeframe', this.settings.features.mtfTimeframe);
+    this._setCheckbox('modal-enable-spoof-detection', this.settings.features.enableSpoofDetection);
+    this._setCheckbox('modal-enable-cusum-drift', this.settings.features.enableCUSUMDrift);
+    this._setCheckbox('modal-enable-risk-guardian', this.settings.features.enableRiskGuardian);
+    this._setCheckbox('modal-enable-auto-optimize', this.settings.features.enableAutoOptimize);
+    this._setCheckbox('modal-enable-auto-toggle-strat', this.settings.features.enableAutoToggleStrat);
+    this._setCheckbox('modal-enable-breakeven-trail', this.settings.features.enableBreakevenTrail);
+    this._setCheckbox('modal-enable-candle-confirm', this.settings.features.enableCandleConfirm);
+    this._setCheckbox('modal-enable-mtf-confirm', this.settings.features.enableMtfConfirm);
+    this._setCheckbox('modal-enable-dynamic-sizing', this.settings.features.enableDynamicSizing);
+    this._setCheckbox('modal-enable-tts', this.settings.features.enableTTS);
+
+    // Strateji toggles
+    const box = document.getElementById('modal-strategy-toggles');
+    if (box) {
+      box.innerHTML = this.strategyKeys.map((key) => {
+        const inst = this.strategies[key];
+        const checked = inst._isLive ? 'checked' : '';
+        return `<label class="checkbox-label"><input type="checkbox" data-strategy="${key}" ${checked}> ${inst?.displayName || key}</label>`;
+      }).join('');
+      box.querySelectorAll('[data-strategy]').forEach((el) => {
+        el.addEventListener('change', () => {
+          this.strategies[el.dataset.strategy]?.setIsLive(el.checked);
+          this.notify.info(`${this.strategies[el.dataset.strategy].displayName} ${el.checked ? 'aktif' : 'pasif'}.`);
+        });
+      });
+    }
+    this._populateVoices();
+  }
+
+  _populateVoices() {
+    const sel = document.getElementById('modal-tts-voice-select');
+    if (!sel) return;
+    const voices = this.tts.getVoices();
+    if (!voices.length) return;
+    sel.innerHTML = voices.map((v) => `<option value="${v.voiceURI}">${v.name} (${v.lang})</option>`).join('');
+    sel.onchange = () => this.tts.setVoice(sel.value);
+  }
+
+  _setCheckbox(id, checked) {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!checked;
+  }
+
+  saveSettingsFromModal() {
+    const num = (id) => parseFloat(document.getElementById(id)?.value) || 0;
+    const bool = (id) => !!document.getElementById(id)?.checked;
+
+    this.settings.confluenceThreshold = num('modal-confluence-threshold');
+    this.settings.params.rsiPeriod = num('modal-param-rsi-period');
+    this.settings.params.atrPeriod = num('modal-param-atr-period');
+    this.settings.params.wallBtc = num('modal-param-wall-btc');
+    this.settings.params.rrRatio = num('modal-param-rr-ratio');
+    this.settings.cooldowns.signalMs = num('modal-signal-cooldown-ms');
+    this.settings.cooldowns.sameDirectionMs = num('modal-same-direction-cooldown-ms');
+    this.settings.cooldowns.oppositeDirectionMs = num('modal-opposite-direction-cooldown-ms');
+    this.settings.cooldowns.reverseHysteresisPoints = num('modal-reverse-hysteresis-points');
+    this.settings.cooldowns.proposalTimeoutMs = num('modal-proposal-timeout-ms');
+    this.settings.cooldowns.strategyProposalMs = num('modal-strategy-proposal-cooldown-ms');
+    this.settings.breakeven.beAtR = num('modal-be-at-r');
+    this.settings.breakeven.trailAfterR = num('modal-trail-after-r');
+    this.settings.breakeven.trailToR = num('modal-trail-to-r');
+    this.settings.features.mtfTimeframe = document.getElementById('modal-mtf-timeframe')?.value || '15m';
+
+    this.settings.features.enableSpoofDetection = bool('modal-enable-spoof-detection');
+    this.settings.features.enableCUSUMDrift = bool('modal-enable-cusum-drift');
+    this.settings.features.enableRiskGuardian = bool('modal-enable-risk-guardian');
+    this.settings.features.enableAutoOptimize = bool('modal-enable-auto-optimize');
+    this.settings.features.enableAutoToggleStrat = bool('modal-enable-auto-toggle-strat');
+    this.settings.features.enableBreakevenTrail = bool('modal-enable-breakeven-trail');
+    this.settings.features.enableCandleConfirm = bool('modal-enable-candle-confirm');
+    this.settings.features.enableMtfConfirm = bool('modal-enable-mtf-confirm');
+    this.settings.features.enableDynamicSizing = bool('modal-enable-dynamic-sizing');
+    this.settings.features.enableTTS = bool('modal-enable-tts');
+
+    this.tts.setEnabled(this.settings.features.enableTTS);
     this.saveSettings();
+    this.closeSettingsModal();
+    this.notify.success('Ayarlar kaydedildi.');
   }
 
-  onSettingChange(key, value) {
-    if (key === 'soundOn') this.effects.setEnabled({ sound: value });
-    if (key === 'voiceAnnounce') this.tts.setEnabled(value);
+  resetAllSettings() {
+    this.settings = structuredClone(DEFAULT_SETTINGS);
+    this.saveSettings();
+    this.closeSettingsModal();
+    this.notify.warning('Tüm ayarlar sıfırlandı.');
   }
 
-  getStrategyMeta() {
-    return Object.fromEntries(
-      Object.entries(STRATEGY_AMBASSADORS).map(([k, v]) => [k, v.ambassador])
-    );
+  // ── Fullscreen / görünüm ─────────────────────────────
+  enterFullscreenChart() {
+    document.body.classList.add('fullscreen-chart');
+    setTimeout(() => this.chartManager?.resize(), 100);
+  }
+
+  exitFullscreenChart() {
+    document.body.classList.remove('fullscreen-chart');
+    setTimeout(() => this.chartManager?.resize(), 100);
+  }
+
+  setView(view) {
+    this.currentMainView = view;
+    this.ui.setView(view);
+    this.saveData('utc_current_view', view);
+  }
+
+  toggleHeader() {
+    this.ui.toggleHeader();
+  }
+
+  togglePanteon() {
+    this.ui.togglePanteon();
   }
 }
 
-export default UltimateTerminal;
+export default UltimateTradingCommandCenter;

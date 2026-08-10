@@ -1,114 +1,88 @@
-# ⚡ BOZOK TERMINAL MOBILE
+# 🏛️ ULTIMATE TRADING KOMUTA MERKEZİ
 
-**BOZOK PRO (mikroyapı)** + **Ultimate Trading Komuta Merkezi (strateji/confluence)** teknik dokümanlarından modüler olarak kodlanmış, **Capacitor** ile Android `.apk` üretilen mobil trading analiz terminali.
+**Barva35.html** referans dosyasından modüler olarak kodlanmış, **Capacitor** ile Android `.apk` üretilen mobil trading analiz terminali.
 
-> ⚠️ Bu uygulama **gerçek trade execution yapmaz.** Sadece analiz + sinyal + paper trading simülasyonu sunar.
+> ⚠️ Bu uygulama **gerçek trade execution yapmaz.** Sadece sinyal üretir, önerir ve takip eder (TP/SL takibi dahil).
 
-## ✨ Özellikler
+## ✨ Özellikler (barva35.html ile birebir)
 
 | Katman | İçerik |
 |---|---|
-| **Mikroyapı** | Order book (spread/OBI/microprice/slope), CVD + velocity, VPIN, flow candle |
-| **9 Dedektör** | Wall, Compression, Spoof, Iceberg, Liquidity Void, Ladder, Book Skew, Flow Pattern, Liquidation Cluster |
-| **20 Strateji** | WallBounce, RSI Divergence, SR, VWAP, FundingRate, Velocity, Breakout, BOS, VolBreak, LiqCascade, OrderFlowMomentum, LiquidityGaps, Fibonacci, VolumeProfile, SmartMoney, Divergence, InstitutionalFlow, MicroSpread, SuperTrend, CandleCharacter |
-| **Confluence** | Zaman çürümesi, Beta-Binomial Bayes ağırlık, MTF bilgelik, gating, cooldown/histerezis |
-| **Panteon** | 5 elçi, itibar, mod çarpanları, Mahşerin 4 Atlısı (Oracle) |
-| **Risk** | Araf Protokolü (kill switch), breakeven/trailing, CUSUM drift |
-| **UI** | 8 sekme, 4 tema, DPR canvas render, TTS (tr-TR), ses efektleri |
+| **20 Strateji** | WallBounce, RSI Divergence, Support/Resistance, VWAP Reversion, FundingRate, Velocity Scalping, Breakout, MarketStructure (BOS), VolatilityBreakout, LiquidationCascade, OrderFlowMomentum, LiquidityGaps, Fibonacci, VolumeProfile, SmartMoney (FVG), Divergence, InstitutionalOrderFlow, MicroSpread, SuperTrend, CandleCharacter |
+| **Confluence Motoru** | Zaman çürümesi `e^(-age/3)`, Beta-Binomial Bayes ağırlık, MTF trend teyidi (×0.6), gating (spread/derinlik), cooldown + histerezis + yön marjı |
+| **Panteon** | Metatron / Uriel / Raphael — itibar sistemi, modlar (İNANÇLI/ŞÜPHECİ/KIYAMET), kehanet (🛡️⚖️⚔️) |
+| **Risk** | Araf Protokolü (kill switch: WR < %35 → durdur), CUSUM drift, spoof detektör, breakeven + trailing stop |
+| **Grafik** | Lightweight Charts (mum + hacim + BB), TP ▲ / SL ▼ marker'lar, zoom/fullscreen |
+| **Isı Haritası** | Emir defteri (orderbook) canlı heatmap |
+| **Ses** | TTS (tr-TR) + kuyruk, partikül efektleri |
+| **UI** | Sinyal barları (METATRON GÜVENİ / URIEL CESARETİ), kehanet paneli, ayarlar modal, sinyal geçmişi tablosu, 3 tema (dark/light/war) |
 
 ## 📁 Klasör Yapısı
 
 ```
 src/
-├── core/        EventBus, Config, State, Utils, Logger
-├── data/        ExchangeManager, BinanceStream, Mock, ZebaniFilter
-├── engines/     Microstructure, Trade, Flow, Signal, PaperTrading
-├── detectors/   DetectorSuite + 9 dedektör
+├── core/        Config (barva35 settings), State, Utils, Logger
+├── data/        BinanceStream (4 stream), ExchangeManager, Mock, Zebani
 ├── strategies/  Strategy base + 20 strateji + registry
-├── confluence/  ConfluenceEngine, BayesianWeighting, MTF
-├── indicators/  RSI, ATR, EMA, SMA, BB, ADX, VWAP, SuperTrend
-├── risk/        RiskGuardian, PositionManager, CUSUM
-├── panteon/     PantheonManager, TheOracle, PantheonEffects
-├── render/      RenderEngine + Book/Flow/Chart/CvdEquity renderer
-├── ui/          UIController, SignalFeed, TtsService
-├── storage/     StorageService, StorageBridge, Migration
-└── app/         App.js (orchestrator) + main.js
+├── confluence/  ConfluenceEngine, MultiTimeframeManager
+├── risk/        RiskGuardian, SpoofDetector, SessionProfiler, CUSUM, PositionManager
+├── panteon/     PantheonManager (3 elçi)
+├── render/      ChartManager (Lightweight Charts), HeatmapManager, EffectsManager
+├── ui/          UIController, NotificationService, TtsService
+├── storage/     DBManager (IndexedDB), StorageBridge, Migration
+└── app/         App.js (UltimateTradingCommandCenter) + main.js
 ```
 
 ## 🛠 Geliştirme
 
 ```bash
-npm install          # bağımlılıklar
-npm run dev          # Vite dev sunucusu (http://localhost:5173)
+npm install          # bağımlılıklar (lightweight-charts dahil)
+npm run dev          # Vite dev sunucusu
+npm test             # 20 birim test (node --test)
 npm run build        # dist/ üret
-npm test             # birim testler (Node test runner)
 ```
 
 ## 📱 APK Üretimi
 
-### Otomatik (önerilen) — GitHub Actions "🚀 BOZOK PRO • Android APK Fabrikası"
-`.github/workflows/build-apk.yml` her `main`/`develop` push'unda otomatik APK derler:
-
-1. Repoyu GitHub'a it (`git push origin main`)
-2. **Actions** sekmesi → "🚀 BOZOK PRO • Android APK Fabrikası" workflow'u çalışır:
-   - 🕵️ **Keşif** → sürüm künyesi + debug/release matrix planı
-   - 🧹 **Kalite** → JS sözdizimi taraması
-   - 🧪 **Test** → 40 birim test + JUnit raporu (artifact)
-   - 📦 **Derleme** → Vite build → Capacitor sync → Debug & Release APK (paralel)
-   - 📊 **Rapor** → APK boyutları GitHub Summary'de
-3. Biten işin **Artifacts** kısmından `🚀-BOZOK-PRO-Debug-*` / `🚀-BOZOK-PRO-Release-*` indir
-4. `v1.0.0` gibi bir tag atarsan APK otomatik **Release** sayfasına eklenir
+### Otomatik — GitHub Actions "🚀 ULTIMATE TRADING • Android APK Fabrikası"
+`.github/workflows/build-apk.yml` her `main`/`develop` push'unda:
+- 🕵️ Keşif (sürüm künyesi + debug/release matrix)
+- 🧹 Kalite (JS sözdizimi taraması)
+- 🧪 Test (20 birim test + JUnit raporu)
+- 📦 Derleme (Vite → Capacitor sync → Debug & Release APK paralel)
+- 🏷️ `v*` tag'inde APK'lar otomatik GitHub Release'e eklenir
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git push origin main
+git tag v1.0.0 && git push origin v1.0.0   # Release + APK
 ```
 
-**Manuel tetikleme:** Actions → workflow → "Run workflow" → build tipi (debug/release/both), test aç/kapa, temiz build seçenekleri.
-
-**Release imzası (isteğe bağlı):** Release APK'yı imzalamak için repo **Secrets**'ına ekle:
-`KEYSTORE_BASE64` (base64 keystore), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
-Secrets yoksa Debug APK imzalı ve kurulabilir durumdadır; Release APK imzasız üretilir (CI'da `apksigner` doğrulaması bilgi amaçlıdır).
-
-### Yerel (Android Studio / SDK varsa)
+### Yerel (SDK varsa)
 ```bash
-npm run build
-npx cap add android    # ilk sefer
-npx cap sync android
+npm run build && npx cap add android && npx cap sync android
 cd android && ./gradlew assembleDebug
 # APK: android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## 🔑 Veri Kaynakları
+## 🔑 Veri Kaynakları (Binance Futures)
 
-| Veri | Kaynak |
+| Veri | Stream/Endpoint |
 |---|---|
-| Order book (100ms diff) | Binance Futures WS `@depth@100ms` |
-| Trade'ler | Binance WS `@aggTrade` |
-| Likidasyonlar | Binance WS `@forceOrder` |
-| 24s değişim | Binance WS `@ticker` |
-| Mumlar | Binance REST `/fapi/v1/klines` |
-| Çoklu borsa | Bybit / OKX / MEXC REST (3s polling) |
+| Fiyat / 24s değişim / hacim | WS `@ticker` |
+| Emir defteri (20 seviye) | WS `@depth20@100ms` |
+| Mumlar | WS `@kline_{tf}` + REST `/fapi/v1/klines` |
+| Trade'ler | WS `@aggTrade` |
+| MTF trend teyidi | REST klines (5m/15m/1h/4h) |
 | Fallback | Mock veri üretici (random walk) |
 
-> CORS kısıtı olan ortamlarda (ör. dosya açma) uygulama otomatik **mock moda** geçer. APK içinde WebView `https` şemasıyla çalışır, CORS sorunu olmaz.
-
-## 🏗 Mimari Felsefe
-
-- **EventBus üzerinden loose-coupling**: modüller birbirini tanımaz
-- **Tek sorumluluk**: her dosya bir sınıf, her sınıf test edilebilir
-- **Formül sadakati**: kaynak dokümanlardaki VPIN, CVD, Kelly, decay, Bayesian formülleri birebir
-- **Mobil-first**: alt navigasyon, dokunmatik kontroller, offline-capable
+> CORS kısıtı olan ortamlarda uygulama otomatik **mock moda** geçer; APK WebView'de `https` şemasıyla çalışır.
 
 ## 📄 Dokümanlar
 
-- [PLAN.md](./PLAN.md) — mimari kararlar ve modül eşlemesi
+- [PLAN.md](./PLAN.md) — mimari kararlar
 - [TODO.md](./TODO.md) — görev takibi
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — detaylı mimari
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — veri akışı
 - [docs/API.md](./docs/API.md) — modül API referansı
 
-## 🧩 Teknoloji
-
-JavaScript (ES Modules) • Vite • Capacitor 6 • GitHub Actions • Binance Futures API
-
 ---
-*Kaynak dokümanlar: BOZOK_PRO_TEKNİK_DOKÜMAN.md, TRADING_TERMINAL_TEKNIK_DOKUMAN v2.0, barva35.html*
+*Tek referans kaynak: barva35.html (ULTIMATE TRADING KOMUTA MERKEZİ)*

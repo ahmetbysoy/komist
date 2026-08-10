@@ -1,20 +1,19 @@
 /**
  * main.js — Bootstrap
- * DOM hazır olunca terminali başlat; global'e aç (Capacitor/WebView uyumu).
+ * UltimateTradingCommandCenter'ı başlat (barva35.html referansı).
  */
-import { UltimateTerminal } from './app/App.js';
+import { UltimateTradingCommandCenter } from './app/App.js';
 import { Logger } from './core/Logger.js';
 
 async function boot() {
   try {
-    window.app = new UltimateTerminal();
-    await window.app.start();
+    window.app = new UltimateTradingCommandCenter();
+    await window.app.init();
   } catch (e) {
     Logger.error('Boot', 'Başlatma hatası:', e);
-    const screen = document.getElementById('boot-screen');
-    if (screen) {
-      screen.innerHTML = `<h1 style="color:#ef4444">HATA</h1><pre style="color:#8b949e;font-size:11px;max-width:90%;overflow:auto">${e.message}</pre>`;
-    }
+    console.error(e);
+    const btn = document.getElementById('start-btn');
+    if (btn) btn.disabled = false;
   }
 }
 

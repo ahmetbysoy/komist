@@ -1,6 +1,6 @@
 {
-  "appId": "com.bozok.terminal",
-  "appName": "Bozok Terminal",
+  "appId": "com.komist.terminal",
+  "appName": "Komuta Merkezi",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"

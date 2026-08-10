@@ -1,15 +1,13 @@
 /**
- * MultiTimeframeManager — Çoklu zaman dilimi doğrulama
- * Kaynak: UTC v2.0 §4.10
- * REST klines ile MTF mumlarını çeker, EMA trendi belirler,
- * bilgelik (wisdom) skoru hesaplar (GPTE bilgelik faktörü).
+ * MultiTimeframeManager — Çoklu zaman dilimi trend teyidi
+ * Kaynak: barva35.html (MultiTimeframeManager) + UTC v2.0 §4.10
+ * Her timeframe için REST klines; EMA(20) bazlı trend tespiti.
  */
 import { CONFIG } from '../core/Config.js';
 import { ema } from '../indicators/EMA.js';
 import { Logger } from '../core/Logger.js';
 
-const TIMEFRAMES = ['1m', '5m', '15m', '1h'];
-const TF_MS = { '1m': 60000, '5m': 300000, '15m': 900000, '1h': 3600000 };
+const TIMEFRAMES = ['5m', '15m', '1h', '4h'];
 
 export class MultiTimeframeManager {
   constructor(bot) {
@@ -18,13 +16,14 @@ export class MultiTimeframeManager {
     this.timers = [];
   }
 
-  async initialize(symbol) {
+  async initialize(symbol, timeframes = TIMEFRAMES) {
     this.cleanup();
-    for (const tf of TIMEFRAMES) {
-      this.data[tf] = { candles: [], trend: 'neutral', wisdom: 50 };
-      this._fetch(symbol, tf);
-      // Periyodik tazeleme
-      this.timers.push(setInterval(() => this._fetch(symbol, tf), 60000));
+    for (const tf of timeframes) {
+      this.data[tf] = { candles: [], trend: 'neutral' };
+      this.fetchHistoricalData(symbol, tf);
+      // Periyodik tazeleme (60s)
+      const id = setInterval(() => this.fetchRealtimeData(symbol, tf), 60000);
+      this.timers.push(id);
     }
   }
 
@@ -33,59 +32,66 @@ export class MultiTimeframeManager {
     this.timers = [];
   }
 
-  async _fetch(symbol, tf) {
+  async fetchHistoricalData(symbol, tf) {
     try {
       const res = await fetch(
         `${CONFIG.exchange.binanceRest}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=100`,
         { signal: AbortSignal.timeout(8000) }
       );
       const raw = await res.json();
+      if (!Array.isArray(raw)) throw new Error('yanıt geçersiz');
       this.data[tf].candles = raw.map((d) => ({
-        time: d[0],
-        open: +d[1], high: +d[2], low: +d[3], close: +d[4],
-        volume: +d[5]
+        time: d[0], open: +d[1], high: +d[2], low: +d[3], close: +d[4], volume: +d[5]
       }));
-      this._calcIndicators(tf);
+      this.calculateIndicators(tf);
     } catch (e) {
-      Logger.debug('MTF', `${tf} veri hatası:`, e.message);
+      Logger.debug('MTF', `${tf} geçmiş hatası:`, e.message);
     }
   }
 
-  _calcIndicators(tf) {
-    const candles = this.data[tf].candles;
-    if (candles.length < 25) return;
+  async fetchRealtimeData(symbol, tf) {
+    // Son mumu tazele
+    try {
+      const res = await fetch(
+        `${CONFIG.exchange.binanceRest}/fapi/v1/klines?symbol=${symbol}&interval=${tf}&limit=2`,
+        { signal: AbortSignal.timeout(8000) }
+      );
+      const raw = await res.json();
+      if (!Array.isArray(raw) || !raw.length) return;
+      const last = raw[raw.length - 1];
+      const candle = { time: last[0], open: +last[1], high: +last[2], low: +last[3], close: +last[4], volume: +last[5] };
+      const arr = this.data[tf].candles;
+      if (arr.length && arr[arr.length - 1].time === candle.time) arr[arr.length - 1] = candle;
+      else arr.push(candle);
+      if (arr.length > 100) arr.shift();
+      this.calculateIndicators(tf);
+    } catch (e) {
+      Logger.debug('MTF', `${tf} canlı hatası:`, e.message);
+    }
+  }
+
+  calculateIndicators(timeframe) {
+    const candles = this.data[timeframe]?.candles;
+    if (!candles || candles.length < 25) return;
     const closes = candles.map((c) => c.close);
     const e = ema(closes, 20);
     const last = closes.at(-1);
     const emaVal = e.at(-1);
-    if (emaVal === null) return;
+    if (emaVal === null || emaVal === undefined) return;
 
-    if (Math.abs(last - emaVal) / emaVal < 0.001) this.data[tf].trend = 'neutral';
-    else this.data[tf].trend = last > emaVal ? 'up' : 'down';
-
-    // Bilgelik: MTF uyumu
-    const upCount = TIMEFRAMES.filter((t) => this.data[t]?.trend === 'up').length;
-    const downCount = TIMEFRAMES.filter((t) => this.data[t]?.trend === 'down').length;
-    this.data[tf].wisdom = Math.round(50 + (upCount - downCount) * 15);
+    if (Math.abs(last - emaVal) / emaVal < 0.001) this.data[timeframe].trend = 'neutral';
+    else this.data[timeframe].trend = last > emaVal ? 'up' : 'down';
   }
 
-  /** GPTE bilgelik faktörü: f = 0.45 + 0.45×(1 - w/100) */
-  getWisdomFactor(tf = '15m') {
-    const w = this.data[tf]?.wisdom ?? 50;
-    return 0.45 + 0.45 * (1 - w / 100);
+  /** Trend: 'up' | 'down' | 'neutral' | 'unknown' */
+  getTrend(timeframe) {
+    return this.data[timeframe]?.trend || 'unknown';
   }
 
-  /** MTF uyumuna göre skoru ölçekle (trend yönüne) */
-  applyWisdom(direction, score) {
-    const up = this.data['15m']?.trend === 'up';
-    const down = this.data['15m']?.trend === 'down';
-    if (direction === 'buy' && down) return score * this.getWisdomFactor();
-    if (direction === 'sell' && up) return score * this.getWisdomFactor();
-    return score;
-  }
-
-  getTrendSummary() {
-    return TIMEFRAMES.map((tf) => `${tf}:${this.data[tf]?.trend?.[0] ?? '?'}`).join(' ');
+  getSummary() {
+    return Object.entries(this.data)
+      .map(([tf, d]) => `${tf}:${(d.trend || '?')[0].toUpperCase()}`)
+      .join(' ');
   }
 }
 

@@ -1,203 +1,229 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="professional">
+<html lang="tr" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0a0e17" />
-  <title>BOZOK TERMINAL</title>
+  <meta name="theme-color" content="#0d1117" />
+  <title>ULTIMATE TRADING KOMUTA MERKEZİ</title>
   <link rel="stylesheet" href="./styles/app.css" />
 </head>
-<body>
-  <!-- Üst şerit -->
+<body class="header-collapsed">
+
+  <!-- Üst şerit (ticker) -->
   <div id="super-top-ticker">
-    <span class="ticker-symbol" id="tickerSymbol">BTCUSDT</span>
-    <span class="ticker-price" id="priceDisplay">0.00</span>
-    <span class="ticker-change" id="change24h">+0.00%</span>
-    <span class="status" id="connStatus">BAĞLANIYOR</span>
+    <div class="super-top-left">
+      <span id="ticker-bar-symbol">BTC/USDT</span>
+      <span id="ticker-bar-price">0.00</span>
+    </div>
+    <div class="super-top-right-buttons">
+      <button id="panteon-toggle-btn" class="btn btn-tiny desktop-only" title="Panteon">🏛️</button>
+      <button id="chart-view-btn" class="btn btn-tiny desktop-only" title="Grafik">📈</button>
+      <button id="heatmap-view-btn" class="btn btn-tiny desktop-only" title="Isı Haritası">🔥</button>
+      <button id="fullscreen-chart-btn" class="btn btn-tiny desktop-only" title="Tam Ekran">⛶</button>
+      <button id="mobile-panteon-toggle-btn" class="btn btn-tiny mobile-only" title="Panteon">🏛️</button>
+      <button id="mobile-fullscreen-chart-btn" class="btn btn-tiny mobile-only" title="Tam Ekran">⛶</button>
+      <button id="mobile-open-log-modal-btn" class="btn btn-tiny mobile-only" title="Log">📜</button>
+      <button id="mobile-open-settings-modal-btn" class="btn btn-tiny btn-success mobile-only" title="Ayarlar">⚙️</button>
+    </div>
   </div>
 
-  <div id="app-root">
-    <!-- Header -->
-    <header id="header">
-      <span class="title">⚡ BOZOK</span>
-      <input id="symbolInput" placeholder="BTCUSDT" value="BTCUSDT" autocomplete="off" spellcheck="false" />
-      <button class="btn btn-primary" id="symbolBtn">Git</button>
+  <!-- Sinyal barları -->
+  <div id="signal-progress-bar-container">
+    <div class="signal-bar-wrapper">
+      <div class="signal-bar-label">METATRON GÜVENİ</div>
+      <div class="signal-bar">
+        <div id="buy-signal-bar-fill" class="signal-bar-fill buy"></div>
+      </div>
+      <div id="buy-signal-score-text" class="signal-score-text">0.0</div>
+    </div>
+    <div class="signal-bar-wrapper">
+      <div class="signal-bar-label">URIEL CESARETİ</div>
+      <div class="signal-bar">
+        <div id="sell-signal-bar-fill" class="signal-bar-fill sell"></div>
+      </div>
+      <div id="sell-signal-score-text" class="signal-score-text">0.0</div>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Header: Komuta Merkezi kontrolleri -->
+    <header class="header">
+      <div id="header-main-bar" class="header-top-bar">
+        <div class="header-left-controls">
+          <button id="mobile-toggle-controls-btn" class="btn btn-tiny mobile-only" title="Kontroller">☰</button>
+        </div>
+        <div class="header-center-title" title="Aç/kapat için dokun">
+          <span class="header-title-text">KOMUTA MERKEZİ KONTROLLERİ</span>
+        </div>
+        <div class="header-right-controls">
+          <button id="mobile-chart-view-btn" class="btn btn-tiny mobile-only" title="Grafik">📈</button>
+          <button id="mobile-heatmap-view-btn" class="btn btn-tiny mobile-only" title="Isı Haritası">🔥</button>
+          <button id="open-settings-modal-btn" class="btn btn-tiny desktop-only">Ayarlar</button>
+        </div>
+      </div>
+      <div class="header-collapsible-content">
+        <div class="main-controls">
+          <input type="text" id="symbol-input" class="form-control" placeholder="BTCUSDT" value="BTCUSDT" autocomplete="off" spellcheck="false" />
+          <select id="timeframe-select" class="form-control">
+            <option value="1m">1m</option><option value="5m">5m</option>
+            <option value="15m" selected>15m</option><option value="1h">1h</option><option value="4h">4h</option>
+          </select>
+          <div class="status">
+            <div id="connection-status" class="status-dot"></div>
+            <span id="connection-text">BAĞLANTI YOK</span>
+          </div>
+          <button id="theme-toggle-btn" class="btn">Tema</button>
+          <button id="start-btn" class="btn btn-success">SİSTEMİ BAŞLAT</button>
+          <button id="stop-btn" class="btn btn-danger" disabled>DURDUR</button>
+          <button id="clear-markers-btn" class="btn">Marker Sil</button>
+        </div>
+        <div class="price-display">
+          <div class="price-item"><div class="price-label">FİYAT</div><div class="price-value" id="current-price">-</div></div>
+          <div class="price-item"><div class="price-label">24s DEĞİŞİM</div><div class="price-value" id="price-change-24h">-</div></div>
+          <div class="price-item"><div class="price-label">24s HACİM</div><div class="price-value" id="volume-24h">-</div></div>
+          <div class="price-item"><div class="price-label">VOLATİLİTE (ATR)</div><div class="price-value" id="atr-value">-</div></div>
+          <div class="price-item countdown"><span id="candle-countdown">--:--</span></div>
+        </div>
+      </div>
     </header>
 
-    <!-- Paneller -->
-    <div id="panels">
-
-      <!-- BOOK -->
-      <section class="panel active" id="tab-book">
-        <div class="panel-title">📊 Order Book Derinliği</div>
-        <div class="canvas-box"><canvas id="book-canvas"></canvas></div>
-        <div class="metrics">
-          <div class="metric"><div class="label">Mid</div><div class="value c-blue" id="midVal">-</div></div>
-          <div class="metric"><div class="label">Spread</div><div class="value c-yel" id="spreadVal">-</div></div>
-          <div class="metric"><div class="label">OBI</div><div class="value" id="obiVal">-</div></div>
-          <div class="metric"><div class="label">Microprice</div><div class="value c-pur" id="microVal">-</div></div>
-        </div>
-        <div class="panel-title" style="margin-top:10px">Katmanlar</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="liquidity" checked /> likidite</label>
-          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="trades" checked /> trades</label>
-          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="walls" /> walls</label>
-          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="spoofing" /> spoof</label>
-          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="iceberg" /> iceberg</label>
-          <label class="setting-row" style="border:none"><input type="checkbox" data-layer="vpvr" /> vpvr</label>
-        </div>
-      </section>
-
-      <!-- FLOW -->
-      <section class="panel" id="tab-flow">
-        <div class="panel-title">🔥 Order Flow Candle</div>
-        <div class="canvas-box"><canvas id="flow-canvas"></canvas></div>
-        <div class="metrics">
-          <div class="metric"><div class="label">Delta (son)</div><div class="value" id="flowDeltaVal">-</div></div>
-          <div class="metric"><div class="label">VPIN</div><div class="value c-yel" id="vpinVal">-</div></div>
-          <div class="metric"><div class="label">CVD</div><div class="value" id="cvdVal">-</div></div>
-          <div class="metric"><div class="label">Rejim</div><div class="value c-pur" id="regimeVal">-</div></div>
-        </div>
-      </section>
-
-      <!-- DEPTH -->
-      <section class="panel" id="tab-depth">
-        <div class="panel-title">🧠 Derinlik Analizi</div>
-        <div class="canvas-box" style="min-height:140px"><canvas id="cvd-canvas"></canvas></div>
-        <div class="canvas-box" style="min-height:140px;margin-top:8px"><canvas id="equity-canvas"></canvas></div>
-        <div class="panel-title" style="margin-top:10px">Derinlik Tablosu</div>
-        <div id="ladderBox" class="ladder-box"></div>
-      </section>
-
-      <!-- SIGNALS -->
-      <section class="panel" id="tab-signals">
-        <div class="panel-title">🚨 Sinyaller</div>
-        <div style="display:flex;gap:6px;margin-bottom:8px">
-          <button class="btn signal-filter" data-filter="all">Tümü</button>
-          <button class="btn signal-filter" data-filter="bullish">▲ Alım</button>
-          <button class="btn signal-filter" data-filter="bearish">▼ Satım</button>
-          <button class="btn signal-filter" data-filter="warning">⚠ Uyarı</button>
-        </div>
-        <div id="signalList"></div>
-      </section>
-
-      <!-- LEVELS -->
-      <section class="panel" id="tab-levels">
-        <div class="panel-title">🎯 Trade Planı & Optimizer</div>
-        <div class="plan-card">
-          <div class="plan-dir" id="planDir" style="color:var(--text-dim)">YÖN YOK</div>
-          <div class="plan-grid">
-            <div class="item"><div class="label">Entry</div><div class="val" id="planEntry">-</div></div>
-            <div class="item"><div class="label">Stop</div><div class="val c-red" id="planStop">-</div></div>
-            <div class="item"><div class="label">TP1</div><div class="val c-green" id="planTp1">-</div></div>
-            <div class="item"><div class="label">TP2</div><div class="val c-green" id="planTp2">-</div></div>
-            <div class="item"><div class="label">RR</div><div class="val c-yel" id="planRR">-</div></div>
-            <div class="item"><div class="label">Confidence</div><div class="val c-blue" id="planConf">-</div></div>
+    <!-- Ana içerik -->
+    <main class="main-grid">
+      <section class="center-panel panel">
+        <div class="data-container">
+          <div class="data-grid" id="chart-container-view">
+            <div id="live-chart"></div>
+            <div class="chart-zoom-controls">
+              <button id="chart-zoom-in" class="btn btn-tiny">+</button>
+              <button id="chart-zoom-out" class="btn btn-tiny">-</button>
+              <button id="chart-zoom-reset" class="btn btn-tiny">Sıfırla</button>
+            </div>
+            <button id="exit-fullscreen-btn" class="btn btn-tiny hidden-view" title="Tam Ekrandan Çık">&times;</button>
+            <div id="chart-countdown-overlay" class="hidden-view">--:--</div>
           </div>
-          <div style="margin-top:8px;font-size:11px;color:var(--text-dim)" id="planReason"></div>
+          <div class="heatmap-container" id="heatmap-container-view">
+            <div class="panel-title">EMİR DEFTERİ ISI HARİTASI</div>
+            <canvas id="orderbook-heatmap"></canvas>
+          </div>
         </div>
-        <div class="panel-title" style="margin-top:12px">Micro Account Optimizer (Kelly)</div>
-        <div class="metrics">
-          <div class="metric"><div class="label">Miktar</div><div class="value" id="microQty">-</div></div>
-          <div class="metric"><div class="label">Kaldıraç</div><div class="value c-yel" id="microLev">-</div></div>
-          <div class="metric"><div class="label">Notional</div><div class="value" id="microNotional">-</div></div>
-          <div class="metric"><div class="label">Liq Fiyat</div><div class="value c-red" id="microLiq">-</div></div>
-          <div class="metric"><div class="label">Max Risk</div><div class="value" id="microRisk">-</div></div>
-        </div>
-        <div class="panel-title" style="margin-top:12px">Narrative (Meta)</div>
-        <div class="plan-card"><div id="narrativeText" style="font-size:11px;color:var(--text-dim)">Veri bekleniyor...</div></div>
       </section>
+    </main>
+  </div>
 
-      <!-- MARKETS -->
-      <section class="panel" id="tab-markets">
-        <div class="panel-title">🌍 Çoklu Borsa</div>
-        <table class="ex-table">
-          <thead><tr><th>Borsa</th><th>Mid</th><th>Spread</th></tr></thead>
-          <tbody>
-            <tr id="ex-binance"><td>Binance</td><td>-</td><td>-</td></tr>
-            <tr id="ex-bybit"><td>Bybit</td><td>-</td><td>-</td></tr>
-            <tr id="ex-okx"><td>OKX</td><td>-</td><td>-</td></tr>
-            <tr id="ex-mexc"><td>MEXC</td><td>-</td><td>-</td></tr>
-          </tbody>
-        </table>
-      </section>
-
-      <!-- PERF -->
-      <section class="panel" id="tab-perf">
-        <div class="panel-title">📈 Performans (Paper)</div>
-        <div class="canvas-box" style="min-height:160px"><canvas id="equity-canvas"></canvas></div>
-        <div class="metrics">
-          <div class="metric"><div class="label">İşlem</div><div class="value" id="perfTrades">0</div></div>
-          <div class="metric"><div class="label">Win Rate</div><div class="value c-green" id="perfWR">-</div></div>
-          <div class="metric"><div class="label">Net R</div><div class="value c-yel" id="perfNetR">-</div></div>
-          <div class="metric"><div class="label">PF</div><div class="value" id="perfPF">-</div></div>
-          <div class="metric"><div class="label">Sharpe</div><div class="value" id="perfSharpe">-</div></div>
-          <div class="metric"><div class="label">Max DD</div><div class="value c-red" id="perfDD">-</div></div>
-        </div>
-      </section>
-
-      <!-- SETTINGS -->
-      <section class="panel" id="tab-settings">
-        <div class="panel-title">⚙️ Ayarlar</div>
-        <div class="panel-title" style="font-size:11px">Tema</div>
-        <div class="theme-row">
-          <button class="theme-btn active" data-theme-option="professional">Pro</button>
-          <button class="theme-btn" data-theme-option="neon">Neon</button>
-          <button class="theme-btn" data-theme-option="minimal">Minimal</button>
-          <button class="theme-btn" data-theme-option="war">Savaş</button>
-        </div>
-        <div class="panel-title" style="font-size:11px;margin-top:10px">Flow</div>
-        <div class="setting-row">
-          <label>Flow Modu</label>
-          <select data-setting="flowMode" data-type="select">
-            <option value="time">Time</option>
-            <option value="volume">Volume</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>Flow Timeframe (ms)</label>
-          <input type="number" data-setting="flowTimeframeMs" />
-        </div>
-        <div class="panel-title" style="font-size:11px;margin-top:10px">Risk</div>
-        <div class="setting-row">
-          <label>Risk %</label>
-          <input type="number" data-setting="riskPct" step="0.5" />
-        </div>
-        <div class="setting-row">
-          <label>Max Kaldıraç</label>
-          <input type="number" data-setting="maxLeverage" />
-        </div>
-        <div class="setting-row">
-          <label>Min RR</label>
-          <input type="number" data-setting="minRR" step="0.5" />
-        </div>
-        <div class="setting-row">
-          <label>Wall Çarpanı</label>
-          <input type="number" data-setting="wallMultiplier" step="0.5" />
-        </div>
-        <div class="panel-title" style="font-size:11px;margin-top:10px">Ses & Bildirim</div>
-        <div class="setting-row">
-          <label>Ses Efektleri</label>
-          <input type="checkbox" data-setting="soundOn" />
-        </div>
-        <div class="setting-row">
-          <label>Sesli Anons</label>
-          <input type="checkbox" data-setting="voiceAnnounce" />
-        </div>
-      </section>
+  <!-- Panteon paneli -->
+  <aside id="panteon-panel">
+    <div class="panteon-header">🏛️ PANTEON</div>
+    <div class="elci-display">
+      <span class="elci-name metatron">Metatron</span>
+      <span class="elci-mode" id="metatron-mode">İNANÇLI</span>
+      <span class="elci-reputation" id="metatron-rep">100</span>
     </div>
+    <div class="elci-display">
+      <span class="elci-name uriel">Uriel</span>
+      <span class="elci-mode" id="uriel-mode">İNANÇLI</span>
+      <span class="elci-reputation" id="uriel-rep">100</span>
+    </div>
+    <div class="elci-display">
+      <span class="elci-name raphael">Raphael</span>
+      <span class="elci-mode" id="raphael-mode">İNANÇLI</span>
+      <span class="elci-reputation" id="raphael-rep">100</span>
+    </div>
+  </aside>
 
-    <!-- Alt navigasyon -->
-    <nav id="bottom-nav">
-      <button class="navItem active" data-tab="book"><span class="icon">📊</span>BOOK</button>
-      <button class="navItem" data-tab="flow"><span class="icon">🔥</span>FLOW</button>
-      <button class="navItem" data-tab="depth"><span class="icon">🧠</span>DEPTH</button>
-      <button class="navItem" data-tab="signals"><span class="icon">🚨</span>SINYAL<span id="signalBadge"></span></button>
-      <button class="navItem" data-tab="levels"><span class="icon">🎯</span>LEVELS</button>
-      <button class="navItem" data-tab="markets"><span class="icon">🌍</span>MKT</button>
-      <button class="navItem" data-tab="perf"><span class="icon">📈</span>PERF</button>
-      <button class="navItem" data-tab="settings"><span class="icon">⚙️</span>SET</button>
-    </nav>
+  <!-- Kehanet paneli -->
+  <aside class="pantheon-panel kehanet-panel" id="kehanet-panel">
+    <div class="kp-row"><span class="kp-key">📅 Seans</span><span class="kp-val" id="kp-session">—</span></div>
+    <div class="kp-row"><span class="kp-key">🛡️ Koruma</span><span class="kp-val" id="kp-guardian">Aktif</span></div>
+    <div class="kp-row"><span class="kp-key">⚖️ Rejim</span><span class="kp-val" id="kp-regime">—</span></div>
+    <div class="kp-row"><span class="kp-key">⚔️ Nabız</span><span class="kp-val" id="kp-pulse">—</span></div>
+    <div class="kp-prophecy">
+      <button id="prophecy-defensive" class="btn btn-tiny" title="Savunmacı">🛡️</button>
+      <button id="prophecy-neutral" class="btn btn-tiny" title="Dengeli">⚖️</button>
+      <button id="prophecy-aggressive" class="btn btn-tiny" title="Saldırgan">⚔️</button>
+    </div>
+  </aside>
+
+  <!-- Efekt katmanları -->
+  <div id="cosmic-effects-layer"></div>
+  <div id="effects-canvas"></div>
+
+  <!-- Bildirimler -->
+  <div id="notifications-container" class="notifications"></div>
+
+  <!-- AYARLAR MODAL -->
+  <div id="settings-modal-overlay">
+    <div class="settings-modal-content">
+      <div class="settings-modal-header">
+        <span>AYARLAR & OPTİMİZASYON</span>
+        <button class="close-btn" id="close-settings-modal-btn">&times;</button>
+      </div>
+      <div class="settings-modal-body">
+        <div class="settings-group">
+          <div class="panel-title">Temel Parametreler</div>
+          <div class="form-group"><label class="form-label">Min. Uyum Skoru (1-10)</label><input type="range" id="modal-confluence-threshold" class="form-control" min="1" max="10" value="3" step="1"></div>
+          <div class="form-group"><label class="form-label">RSI Periyodu</label><input type="number" id="modal-param-rsi-period" class="form-control" value="14"></div>
+          <div class="form-group"><label class="form-label">ATR Periyodu</label><input type="number" id="modal-param-atr-period" class="form-control" value="14"></div>
+          <div class="form-group"><label class="form-label">Duvar Tespiti (BTC)</label><input type="number" id="modal-param-wall-btc" class="form-control" value="20"></div>
+          <div class="form-group"><label class="form-label">Risk/Ödül (R/R)</label><input type="number" id="modal-param-rr-ratio" class="form-control" value="1.5" step="0.1"></div>
+        </div>
+        <div class="settings-group">
+          <div class="panel-title">Cooldown Ayarları</div>
+          <div class="form-group"><label class="form-label">Genel Sinyal Cooldown (ms)</label><input type="number" id="modal-signal-cooldown-ms" class="form-control" value="15000" step="100"></div>
+          <div class="form-group"><label class="form-label">Aynı Yön Cooldown (ms)</label><input type="number" id="modal-same-direction-cooldown-ms" class="form-control" value="30000" step="100"></div>
+          <div class="form-group"><label class="form-label">Ters Yön Cooldown (ms)</label><input type="number" id="modal-opposite-direction-cooldown-ms" class="form-control" value="20000" step="100"></div>
+          <div class="form-group"><label class="form-label">Ters Yön Histerezis (+Puan)</label><input type="number" id="modal-reverse-hysteresis-points" class="form-control" value="2" step="1"></div>
+          <div class="form-group"><label class="form-label">Proposal Timeout (ms)</label><input type="number" id="modal-proposal-timeout-ms" class="form-control" value="3000" step="100"></div>
+          <div class="form-group"><label class="form-label">Strateji Teklifi Cooldown (ms)</label><input type="number" id="modal-strategy-proposal-cooldown-ms" class="form-control" value="10000" step="100"></div>
+        </div>
+        <div class="settings-group">
+          <div class="panel-title">Gelişmiş Özellikler</div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-spoof-detection" checked> Spoof Tespiti</label></div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-cusum-drift" checked> CUSUM Sapma Tespiti</label></div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-risk-guardian" checked> Risk Koruyucu (Kill Switch)</label></div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-auto-optimize" checked> Oto-Optimizasyon</label></div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-auto-toggle-strat" checked> Stratejileri Oto-Ayarla</label></div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-breakeven-trail" checked> Maliyete Çek / Trailing SL</label></div>
+          <div class="form-group"><label class="form-label">BE R Oranı</label><input type="number" id="modal-be-at-r" class="form-control" value="0.8" step="0.1"></div>
+          <div class="form-group"><label class="form-label">Trailing Başlangıç R</label><input type="number" id="modal-trail-after-r" class="form-control" value="1.5" step="0.1"></div>
+          <div class="form-group"><label class="form-label">Trailing Kâr R</label><input type="number" id="modal-trail-to-r" class="form-control" value="0.5" step="0.1"></div>
+        </div>
+        <div class="settings-group">
+          <div class="panel-title">Sinyal Teyit & Filtreleme</div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-candle-confirm" checked> Mum Kapanışını Bekle</label></div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-mtf-confirm" checked> Üst TF Trend Teyidi</label></div>
+          <div class="form-group">
+            <label class="form-label">MTF Zaman Dilimi</label>
+            <select id="modal-mtf-timeframe" class="form-control">
+              <option value="5m">5m</option><option value="15m" selected>15m</option>
+              <option value="1h">1h</option><option value="4h">4h</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-dynamic-sizing" checked> Dinamik Boyutlandırma</label></div>
+          <hr style="border-color: var(--border-color); margin: 10px 0;">
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="modal-enable-tts" checked> Sesli Bildirimler</label></div>
+          <div class="form-group"><label class="form-label">Ses Seçimi</label><select id="modal-tts-voice-select" class="form-control"></select></div>
+        </div>
+        <div class="settings-group" style="grid-column: 1 / -1;">
+          <div class="panel-title">Aktif Stratejiler</div>
+          <div id="modal-strategy-toggles" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px;"></div>
+        </div>
+        <div class="settings-group" style="grid-column: 1 / -1;">
+          <div class="panel-title">Sinyal Geçmişi</div>
+          <div class="data-table-container" style="max-height: 260px; overflow-y: auto;">
+            <table class="data-table">
+              <thead>
+                <tr><th>Zaman</th><th>Sembol</th><th>Tip</th><th>Fiyat</th><th>TP</th><th>SL</th><th>Skor</th><th>Durum</th></tr>
+              </thead>
+              <tbody id="signal-history-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="settings-modal-footer">
+          <button id="reset-all-settings-btn" class="btn btn-danger">Tümünü Sıfırla</button>
+          <button id="save-settings-btn" class="btn btn-success">Kaydet</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="./main.js"></script>

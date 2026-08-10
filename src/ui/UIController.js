@@ -1,272 +1,202 @@
 /**
- * UIController — DOM event binding, sekme/layer/sembol/ayar yönetimi
- * Kaynak: BOZOK PRO §12 + UTC v2.0 §21
+ * UIController — DOM bağlama ve görünüm güncelleme (barva35 initUI mantığı)
+ * Ticker, sinyal barları, header, panteon/kehanet panelleri, modal'lar, çizelge görünümleri.
  */
 import { STATE } from '../core/State.js';
 import { CONFIG } from '../core/Config.js';
-import { fmtPrice, fmtNotional, fmtPct } from '../core/Utils.js';
-import { Logger } from '../core/Logger.js';
+import { formatPrice, formatVolume, getDecimalPlaces } from '../core/Utils.js';
 
 const $ = (id) => document.getElementById(id);
 
 export class UIController {
-  constructor(bus, { app }) {
-    this.bus = bus;
-    this.app = app;
-    this._bind();
-    this._bindEvents();
+  constructor(bot) {
+    this.bot = bot;
+    this._bindStatic();
   }
 
-  // ── Genel DOM bağlama ─────────────────────────────────
-  _bind() {
-    // Sekmeler
-    document.querySelectorAll('.navItem').forEach((n) => {
-      n.addEventListener('click', () => this.switchTab(n.dataset.tab));
+  // ── Statik event bağlama ─────────────────────────────
+  _bindStatic() {
+    // Sembol + timeframe
+    $('symbol-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this.bot.changeSymbol($('symbol-input').value);
     });
-
-    // Sembol girişi
-    const si = $('symbolInput');
-    if (si) {
-      si.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') this.commitSymbol();
-      });
-    }
-    if ($('symbolBtn')) $('symbolBtn').addEventListener('click', () => this.commitSymbol());
-
-    // Katman toggles
-    document.querySelectorAll('[data-layer]').forEach((el) => {
-      const layer = el.dataset.layer;
-      el.checked = STATE.activeLayers.includes(layer);
-      el.addEventListener('change', (e) => this.toggleLayer(layer, e.target.checked));
-    });
-
-    // Ayar değişiklikleri
-    document.querySelectorAll('[data-setting]').forEach((el) => {
-      const key = el.dataset.setting;
-      const type = el.dataset.type || el.type;
-      if (type === 'checkbox') {
-        el.checked = !!CONFIG[key];
-        el.addEventListener('change', (e) => {
-          CONFIG[key] = e.target.checked;
-          this.app.onSettingChange?.(key, CONFIG[key]);
-          this.app.saveSettings?.();
-        });
-      } else {
-        el.value = CONFIG[key] ?? '';
-        el.addEventListener('change', (e) => {
-          const v = el.type === 'number' ? parseFloat(e.target.value) : e.target.value;
-          CONFIG[key] = isFinite(v) ? v : e.target.value;
-          this.app.onSettingChange?.(key, CONFIG[key]);
-          this.app.saveSettings?.();
-        });
-      }
+    $('timeframe-select')?.addEventListener('change', (e) => {
+      this.bot.changeTimeframe(e.target.value);
     });
 
     // Tema
-    document.querySelectorAll('[data-theme-option]').forEach((el) => {
-      el.addEventListener('click', () => this.app.setTheme?.(el.dataset.themeOption));
-    });
+    $('theme-toggle-btn')?.addEventListener('click', () => this.bot.toggleTheme());
 
-    // Sinyal filtreleri
-    document.querySelectorAll('.signal-filter').forEach((el) => {
-      el.addEventListener('click', () => {
-        this.app.signalFeed?.setFilter(el.dataset.filter);
-      });
-    });
+    // Başlat / Durdur
+    $('start-btn')?.addEventListener('click', () => this.bot.start());
+    $('stop-btn')?.addEventListener('click', () => this.bot.stop());
+
+    // Header collapse (mobil kontroller)
+    $('header-main-bar')?.addEventListener('click', () => this.bot.toggleHeader());
+
+    // Görünüm: grafik / ısı haritası
+    $('chart-view-btn')?.addEventListener('click', () => this.bot.setView('chart'));
+    $('heatmap-view-btn')?.addEventListener('click', () => this.bot.setView('heatmap'));
+    $('mobile-chart-view-btn')?.addEventListener('click', () => this.bot.setView('chart'));
+    $('mobile-heatmap-view-btn')?.addEventListener('click', () => this.bot.setView('heatmap'));
+
+    // Chart zoom
+    $('chart-zoom-in')?.addEventListener('click', () => this.bot.chartManager?.zoomIn());
+    $('chart-zoom-out')?.addEventListener('click', () => this.bot.chartManager?.zoomOut());
+    $('chart-zoom-reset')?.addEventListener('click', () => this.bot.chartManager?.resetZoom());
+
+    // Fullscreen
+    $('fullscreen-chart-btn')?.addEventListener('click', () => this.bot.enterFullscreenChart());
+    $('mobile-fullscreen-chart-btn')?.addEventListener('click', () => this.bot.enterFullscreenChart());
+    $('exit-fullscreen-btn')?.addEventListener('click', () => this.bot.exitFullscreenChart());
+
+    // Panteon / modal
+    $('panteon-toggle-btn')?.addEventListener('click', () => this.bot.togglePanteon());
+    $('mobile-panteon-toggle-btn')?.addEventListener('click', () => this.bot.togglePanteon());
+    $('open-settings-modal-btn')?.addEventListener('click', () => this.bot.openSettingsModal());
+    $('mobile-open-settings-modal-btn')?.addEventListener('click', () => this.bot.openSettingsModal());
+    $('close-settings-modal-btn')?.addEventListener('click', () => this.bot.closeSettingsModal());
+    $('save-settings-btn')?.addEventListener('click', () => this.bot.saveSettingsFromModal());
+    $('reset-all-settings-btn')?.addEventListener('click', () => this.bot.resetAllSettings());
+
+    // Kehanet
+    $('prophecy-defensive')?.addEventListener('click', () => this.bot.applyProphecy('DEFENSIVE'));
+    $('prophecy-neutral')?.addEventListener('click', () => this.bot.applyProphecy('NEUTRAL'));
+    $('prophecy-aggressive')?.addEventListener('click', () => this.bot.applyProphecy('AGGRESSIVE'));
+
+    // Mobile log
+    $('mobile-open-log-modal-btn')?.addEventListener('click', () => this.bot.exportLogs?.());
+
+    // Grafiktir sinyallerini sil
+    $('clear-markers-btn')?.addEventListener('click', () => this.bot.chartManager?.clearMarkers());
   }
 
-  // ── EventBus abonelikleri ─────────────────────────────
-  _bindEvents() {
-    this.bus.on('signal:updated', () => {
-      this.updateSignalBadge();
-      this.app.signalFeed?.render();
-    });
-    this.bus.on('connection:update', () => this.updateStatus());
-    this.bus.on('narrative:update', (n) => {
-      const el = $('narrativeText');
-      if (el) el.textContent = n;
-    });
-    this.bus.on('plan:update', (p) => this.renderPlan(p));
-    this.bus.on('microoptimizer:update', (m) => this.renderMicro(m));
-    this.bus.on('micro:update', () => this.updateMicroStats());
-    this.bus.on('exchanges:update', () => this.renderExchanges());
-    this.bus.on('paper:close', () => this.renderPerf());
-    this.bus.on('horseman:change', (h) => {
-      const el = $('regimeVal');
-      if (el) {
-        el.textContent = h || '—';
-        el.className = 'value ' + (h === 'SALGIN' ? 'c-red' : h ? 'c-pur' : '');
+  // ── Görünüm güncellemeleri ───────────────────────────
+  updateTicker() {
+    const md = STATE.marketData;
+    const sym = $('ticker-bar-symbol');
+    if (sym) sym.textContent = md.symbol.replace('USDT', '/USDT');
+    const price = $('ticker-bar-price');
+    if (price) price.textContent = formatPrice(md.price);
+    const chg = $('price-change-24h');
+    if (chg) {
+      const ch = md.change24h;
+      chg.textContent = (ch >= 0 ? '+' : '') + ch.toFixed(2) + '%';
+      chg.style.color = ch >= 0 ? 'var(--positive)' : 'var(--negative)';
+    }
+    const vol = $('volume-24h');
+    if (vol) vol.textContent = formatVolume(md.volume24h);
+  }
+
+  updatePriceDisplay() {
+    const md = STATE.marketData;
+    const cur = $('current-price');
+    if (cur) {
+      cur.textContent = formatPrice(md.price);
+      cur.style.color = md.price >= (this._lastShownPrice || 0) ? 'var(--positive)' : 'var(--negative)';
+      this._lastShownPrice = md.price;
+    }
+    const atr = $('atr-value');
+    if (atr && STATE.indicators.atr) atr.textContent = formatPrice(STATE.indicators.atr);
+  }
+
+  updateConnection(status, text) {
+    const dot = $('connection-status');
+    const txt = $('connection-text');
+    if (dot) dot.className = 'status-dot ' + (status ? 'online' : '');
+    if (txt) txt.textContent = text || (status ? 'BAĞLANTI VAR' : 'BAĞLANTI YOK');
+  }
+
+  /** Sinyal barları (METATRON GÜVENİ / URIEL CESARETİ) */
+  updateSignalBars(buyScore, sellScore) {
+    const bfill = $('buy-signal-bar-fill');
+    const sfill = $('sell-signal-bar-fill');
+    const btext = $('buy-signal-score-text');
+    const stext = $('sell-signal-score-text');
+    const w = (v) => Math.min(100, Math.max(0, v * 10)) + '%';
+    if (bfill) bfill.style.width = w(buyScore);
+    if (sfill) sfill.style.width = w(sellScore);
+    if (btext) btext.textContent = buyScore.toFixed(1);
+    if (stext) stext.textContent = sellScore.toFixed(1);
+  }
+
+  /** Panteon paneli (3 elçi) */
+  updatePanteon(elciler) {
+    for (const e of elciler) {
+      const mode = $(`${e.key}-mode`);
+      const rep = $(`${e.key}-rep`);
+      if (mode) {
+        mode.textContent = e.mode;
+        mode.className = 'elci-mode ' + (e.mode === 'İNANÇLI' ? 'inancli' : e.mode === 'ŞÜPHECİ' ? 'supheci' : 'kiyamet');
       }
-    });
-    this.bus.on('book:update', () => this.renderLadder());
-  }
-
-  /** Derinlik tablosu (ladder) — DOM tabanlı */
-  renderLadder() {
-    const box = $('ladderBox');
-    if (!box) return;
-    const bids = STATE.book.bids.slice(0, 12);
-    const asks = STATE.book.asks.slice(0, 12).reverse();
-    const maxQty = Math.max(
-      ...bids.map((b) => b.qty),
-      ...asks.map((a) => a.qty),
-      1
-    );
-    const rows = [
-      ...asks.map((l) => ({ ...l, side: 'ask' })),
-      ...bids.map((l) => ({ ...l, side: 'bid' }))
-    ];
-    box.innerHTML = `<table class="ladder">` + rows.map((l) => `
-      <tr class="${l.side}">
-        <td class="qty-cell" style="width:45%">
-          <span class="qty-bar" style="width:${(l.qty / maxQty) * 100}%;background:${l.side === 'bid' ? '#10b981' : '#ef4444'}"></span>
-          <span style="position:relative">${l.qty.toFixed(4)}</span>
-        </td>
-        <td class="price">${fmtPrice(l.price)}</td>
-        <td style="text-align:right;color:var(--text-dim)">${fmtNotional(l.notional)}</td>
-      </tr>`).join('') + `</table>`;
-  }
-
-  // ── Sekmeler ──────────────────────────────────────────
-  switchTab(tab) {
-    STATE.activeTab = tab;
-    document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
-    $('tab-' + tab)?.classList.add('active');
-
-    document.querySelectorAll('.navItem').forEach((n) => n.classList.remove('active'));
-    document.querySelector(`.navItem[data-tab="${tab}"]`)?.classList.add('active');
-
-    if (tab === 'signals') STATE.signals.forEach((s) => (s.read = true));
-
-    // Tab'a özel canvas kayıtları
-    this.app.render.registerCanvas('book-canvas', 'book');
-    this.app.render.registerCanvas('flow-canvas', 'flow');
-    this.app.render.registerCanvas('cvd-canvas', 'cvd');
-    this.app.render.registerCanvas('equity-canvas', 'equity');
-    this.app.render.registerCanvas('chart-canvas', 'chart');
-
-    this.app.render.renderAll(true);
-    this.app.saveSettings?.();
-  }
-
-  // ── Katmanlar ─────────────────────────────────────────
-  toggleLayer(layer, on) {
-    if (on && !STATE.activeLayers.includes(layer)) STATE.activeLayers.push(layer);
-    if (!on) STATE.activeLayers = STATE.activeLayers.filter((x) => x !== layer);
-    this.app.render.renderAll(true);
-    this.app.saveSettings?.();
-  }
-
-  // ── Sembol ────────────────────────────────────────────
-  commitSymbol() {
-    const input = $('symbolInput');
-    if (!input) return;
-    const s = input.value.toUpperCase().trim().replace(/\s/g, '');
-    if (!/^[A-Z]{2,10}USDT$/.test(s)) { input.value = STATE.symbol; return; }
-    if (s === STATE.symbol) return;
-    this.app.changeSymbol(s);
-  }
-
-  // ── Görünüm güncellemeleri ────────────────────────────
-  updateStatus() {
-    const el = $('connStatus');
-    if (el) {
-      el.textContent = STATE.connected ? 'CANLI' : (CONFIG.useMockFallback ? 'MOCK' : 'BAĞLANTI YOK');
-      el.className = STATE.connected ? 'status online' : 'status';
-    }
-    const sym = $('tickerSymbol');
-    if (sym) sym.textContent = STATE.symbol;
-    const pe = $('priceDisplay');
-    if (pe) pe.textContent = fmtPrice(STATE.lastPrice);
-    const ch = $('change24h');
-    if (ch) {
-      ch.textContent = fmtPct(STATE.priceChange24h);
-      ch.style.color = STATE.priceChange24h >= 0 ? '#10b981' : '#ef4444';
+      if (rep) {
+        rep.textContent = Math.round(e.reputation);
+        rep.className = 'elci-reputation ' + (e.reputation >= 80 ? 'inancli' : e.reputation >= 50 ? 'supheci' : 'kiyamet');
+      }
     }
   }
 
-  updateMicroStats() {
-    const m = STATE.micro;
-    if (!m) return;
-    const set = (id, text) => {
-      const el = $(id);
-      if (el) el.textContent = text;
-    };
-    set('spreadVal', fmtPrice(m.spread));
-    set('obiVal', m.obi.toFixed(3));
-    set('microVal', fmtPrice(m.microprice));
-    set('midVal', fmtPrice(m.mid));
-    set('vpinVal', `${(STATE.vpin.value * 100).toFixed(0)}% ${STATE.vpin.label}`);
-    set('cvdVal', fmtNotional(STATE.cvd));
-    set('flowDeltaVal', (() => {
-      const c = STATE.flowCandles.at(-1);
-      return c ? fmtNotional(c.delta) : '-';
-    })());
-  }
-
-  updateSignalBadge() {
-    const el = $('signalBadge');
-    if (el) {
-      const unread = STATE.signals.filter((s) => !s.read).length;
-      el.textContent = STATE.signals.length ? String(STATE.signals.length) : '';
-      el.style.display = STATE.signals.length ? 'inline-flex' : 'none';
-      el.style.background = unread > 0 ? '#ef4444' : '#3b82f6';
-    }
-  }
-
-  renderPlan(plan) {
-    if (!plan) return;
+  /** Kehanet paneli */
+  updateKehanet({ session, regime, pulse, guardian }) {
     const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
-    set('planDir', plan.direction);
-    set('planConf', plan.confidence ? `%${plan.confidence}` : '');
-    if (plan.direction !== 'NEUTRAL') {
-      set('planEntry', fmtPrice(plan.entry));
-      set('planStop', fmtPrice(plan.stop));
-      set('planTp1', fmtPrice(plan.tp1));
-      set('planTp2', fmtPrice(plan.tp2));
-      set('planRR', plan.rr.toFixed(2));
-      set('planReason', plan.reason || '');
-    } else {
-      set('planReason', plan.reason || 'Yön yok — sinyal birikimi bekleniyor');
-    }
+    set('kp-session', session);
+    set('kp-regime', regime);
+    set('kp-pulse', pulse);
+    set('kp-guardian', guardian);
   }
 
-  renderMicro(m) {
-    if (!m) return;
-    const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
-    set('microQty', m.qty.toFixed(6));
-    set('microLev', `${m.leverage.toFixed(1)}x`);
-    set('microNotional', fmtNotional(m.notional));
-    set('microLiq', fmtPrice(m.liqPrice));
-    set('microRisk', `$${m.maxRiskUSD.toFixed(2)}`);
+  updateCandleCountdown(secs) {
+    const el = $('candle-countdown');
+    if (el) el.textContent = secs > 0 ? `⏳ ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : '--:--';
   }
 
-  renderExchanges() {
-    const names = { binance: 'Binance', bybit: 'Bybit', okx: 'OKX', mexc: 'MEXC' };
-    for (const [key, ex] of Object.entries(STATE.exchanges)) {
-      const row = $('ex-' + key);
-      if (!row) continue;
-      const mid = ex.mid ? fmtPrice(ex.mid) : '—';
-      const spread = ex.bid && ex.ask
-        ? (((ex.ask - ex.bid) / ex.mid) * 10000).toFixed(1) + ' bps'
-        : '—';
-      row.innerHTML = `<span>${names[key]}</span><span class="${ex.status === 'ok' ? 'c-green' : 'c-red'}">${mid}</span><span>${spread}</span>`;
-    }
+  setView(view) {
+    STATE.activeView = view;
+    const chartView = $('chart-container-view');
+    const heatView = $('heatmap-container-view');
+    if (chartView) chartView.style.display = view === 'chart' ? '' : 'none';
+    if (heatView) heatView.style.display = view === 'heatmap' ? '' : 'none';
+    if (view === 'chart') setTimeout(() => this.bot.chartManager?.resize(), 50);
+    if (view === 'heatmap') this.bot.heatmapManager?.resize();
   }
 
-  renderPerf() {
-    const p = STATE.performance;
-    const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
-    set('perfTrades', p.trades);
-    set('perfWR', p.trades ? ((p.wins / p.trades) * 100).toFixed(1) + '%' : '—');
-    set('perfNetR', p.netR.toFixed(2) + 'R');
-    set('perfPF', p.pf.toFixed(2));
-    set('perfSharpe', p.sharpe.toFixed(2));
-    set('perfDD', p.maxDD.toFixed(1) + '%');
+  toggleHeader() {
+    document.body.classList.toggle('header-collapsed');
+    STATE.headerCollapsed = document.body.classList.contains('header-collapsed');
+    this.bot.saveData('utc_header_collapsed', String(STATE.headerCollapsed));
+    setTimeout(() => this.bot.chartManager?.resize(), 350);
   }
 
-  log(message, type = 'info') {
-    Logger.info('UI', message);
+  togglePanteon() {
+    const panel = $('panteon-panel');
+    if (panel) panel.classList.toggle('visible');
+  }
+
+  enterFullscreenChart() {
+    document.body.classList.add('fullscreen-chart');
+    setTimeout(() => this.bot.chartManager?.resize(), 100);
+  }
+
+  exitFullscreenChart() {
+    document.body.classList.remove('fullscreen-chart');
+    setTimeout(() => this.bot.chartManager?.resize(), 100);
+  }
+
+  /** Sinyal listesi render (modal içindeki tablo) */
+  renderSignals(signals) {
+    const tbody = $('signal-history-body');
+    if (!tbody) return;
+    tbody.innerHTML = signals.slice(0, 50).map((s) => `
+      <tr>
+        <td>${new Date(s.timestamp).toLocaleTimeString('tr-TR')}</td>
+        <td>${s.symbol || STATE.symbol}</td>
+        <td>${s.type || '-'}</td>
+        <td>${formatPrice(s.price)}</td>
+        <td>${s.tp ? formatPrice(s.tp) : '-'}</td>
+        <td>${s.sl ? formatPrice(s.sl) : '-'}</td>
+        <td>${s.score?.toFixed(1) ?? '-'}</td>
+        <td style="color:${s.status === 'tp' ? 'var(--positive)' : s.status === 'sl' ? 'var(--negative)' : 'var(--neutral)'}">${s.status || ''}</td>
+      </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Henüz sinyal yok</td></tr>';
   }
 }
 

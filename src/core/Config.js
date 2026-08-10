@@ -1,117 +1,93 @@
 /**
- * CONFIG — Sabit ayarlar (kaynak: BOZOK PRO §3 + UTC v2.0 §22 merge)
- * Tüm modüller bu nesneden okur; UI ayar değişiklikleri buraya yansır.
+ * CONFIG — Varsayılan ayarlar (barva35.html referansı — UTC v2.0 §22)
+ * UI ayar değişiklikleri `settings` üzerinden uygulanır; bu nesne varsayılanları taşır.
  */
-export const CONFIG = {
-  // ── Genel ─────────────────────────────────────────────
-  defaultSymbol: 'BTCUSDT',
-  depthLevels: 20,
-  heatmapWindowSec: 30,
-  staleThresholdMs: 5000,
-  marketLatencyHaircutAfterMs: 150,
-  useMockFallback: true,
+export const DEFAULT_SETTINGS = {
+  // ── Temel parametreler ───────────────────────────────
+  confluenceThreshold: 3,
+  params: { rsiPeriod: 14, atrPeriod: 14, wallBtc: 20, rrRatio: 1.5 },
 
-  // ── Flow ──────────────────────────────────────────────
-  flowTimeframeMs: 5000,
-  flowMode: 'time',          // 'time' | 'volume'
-  flowVolumeTarget: 1000000, // $ hedef notional
-
-  // ── Dedektör ──────────────────────────────────────────
-  wallMultiplier: 3.0,
-  minConfidence: 60,
-  spoofWindowSec: 3,
-
-  // ── Risk / Paper Trading ──────────────────────────────
-  balance: 1000,
-  riskPct: 2,
-  maxLeverage: 20,
-  feeRateBps: 4,             // 0.04%
-  minRR: 2.5,
-  kellyFraction: 0.35,
-  mmr: 0.004,                // Maintenance margin rate
-
-  // ── Görünüm / Ses ─────────────────────────────────────
-  theme: 'professional',     // 'professional' | 'neon' | 'minimal' | 'war'
-  soundOn: false,
-  voiceAnnounce: false,
-
-  // ── UTC Confluence ────────────────────────────────────
-  confluence: {
+  // ── Cooldown ayarları ────────────────────────────────
+  cooldowns: {
     signalMs: 15000,
     sameDirectionMs: 30000,
     oppositeDirectionMs: 20000,
     reverseHysteresisPoints: 2,
     proposalTimeoutMs: 3000,
-    strategyProposalMs: 10000,
-    timeDecaySec: 3,
-    dirMargin: 0.5,
-    minContributors: 2,
-    minGroups: 1,
-    threshold: 3
+    strategyProposalMs: 10000
   },
 
-  // ── Gating ────────────────────────────────────────────
-  gating: {
-    enabled: true,
-    spreadMaxPct: 0.001,     // %0.1
-    minDepthUsd: 50000
+  // ── Gelişmiş özellikler ──────────────────────────────
+  features: {
+    enableSpoofDetection: true,
+    enableCUSUMDrift: true,
+    enableRiskGuardian: true,
+    enableAutoOptimize: true,
+    enableAutoToggleStrat: true,
+    enableBreakevenTrail: true,
+    enableCandleConfirm: true,
+    enableMtfConfirm: true,
+    mtfTimeframe: '15m',
+    enableDynamicSizing: true,
+    enableTTS: true
   },
 
-  // ── TP/SL & Breakeven ─────────────────────────────────
-  tpSl: {
-    atrPeriod: 14,
-    rrRatioBase: 1.5,
-    breakeven: { enabled: true, beAtR: 0.8 },
-    trailing: { enabled: true, trailAfterR: 1.5, trailToR: 0.5 }
-  },
+  // ── Breakeven & Trailing ─────────────────────────────
+  breakeven: { beAtR: 0.8, trailAfterR: 1.5, trailToR: 0.5 },
 
-  // ── Oto-optimizasyon ──────────────────────────────────
+  // ── Oto-optimizasyon ─────────────────────────────────
   optimization: {
     enabled: true,
     autoToggle: true,
+    timeDecaySec: 3,
+    dirMargin: 0.5,
     minWeightToStay: 0.60,
-    minContribForToggle: 30
+    minContribForToggle: 30,
+    gating: { enabled: true, spreadMaxPct: 0.001, minDepthUsd: 50000 },
+    signalQuality: { minContributors: 2, minGroups: 1 }
   },
 
-  // ── Panteon ───────────────────────────────────────────
+  // ── Risk ─────────────────────────────────────────────
+  riskGuardian: { killSwitchWinRate: 35.0 },
+
+  // ── Panteon ──────────────────────────────────────────
   panteon: {
-    reputationBounds: { min: -100, max: 100 },
-    reputationWeights: {
-      tpContributor: 1.0,
-      tpRaphael: 0.5,
-      slAll: -2.0,
-      slResponsibleExtra: -3.0,
-      dormancyPenalty: -1.0
-    },
-    modeThresholds: { inanc: 20, kiyamet: -10 },
-    dormancyHours: 4,
-    whisperTtlMs: 1800000    // 30 dk fısıltı
-  },
+    reputationBounds: { min: 0, max: 150 },
+    dormancyHours: 4
+  }
+};
 
-  // ── Oracle (4 Atlı) ───────────────────────────────────
-  oracle: {
-    warAtrPct: 0.02,
-    famineVolFactor: 0.6,
-    plagueDropPct: -0.015,
-    deathTrendAdx: 18,
-    checkIntervalMs: 7000
-  },
+/** Genel sabitler */
+export const CONFIG = {
+  defaultSettings: DEFAULT_SETTINGS,
+  defaultSymbol: 'BTCUSDT',
+  defaultTimeframe: '15m',
+  soundOn: false,
+  voiceAnnounce: true,
+  theme: 'dark',                // 'dark' | 'light' | 'war'
+  balance: 1000,
+  riskPct: 2,
+  maxLeverage: 20,
+  useMockFallback: true,
+  staleThresholdMs: 5000,
 
-  // ── Veri ──────────────────────────────────────────────
   exchange: {
     binanceWs: 'wss://fstream.binance.com/stream?streams=',
     binanceRest: 'https://fapi.binance.com',
-    pollingMs: 3000,
     reconnectBaseMs: 3000,
-    reconnectCapMs: 30000,
-    crossExchanges: ['bybit', 'okx', 'mexc']
+    reconnectCapMs: 30000
   },
 
-  // ── Zebani (bad tick) ─────────────────────────────────
   zebani: {
     enabled: true,
-    jumpPct: 0.015,          // %1.5 sıçrama
+    jumpPct: 0.015,
     windowMs: 500
+  },
+
+  session: {
+    asia: [0, 8],       // UTC saat aralıkları
+    london: [7, 16],
+    newyork: [12, 21]
   }
 };
 

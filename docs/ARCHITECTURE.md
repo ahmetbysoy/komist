@@ -1,85 +1,52 @@
-# 🏗 BOZOK TERMINAL MOBILE — Mimari Dokümanı
+# 🏗 ULTIMATE TRADING KOMUTA MERKEZİ — Mimari
 
 ## 1. Veri Akışı
 
 ```
-Binance WS (4 stream) ──► ExchangeManager
-  ├─ @depth@100ms ─► MicrostructureEngine.applyDiff ─► book:update
-  │                     └─ recompute() ─► micro:update (spread/OBI/microprice/slope)
-  │                     └─ DetectorSuite.run() ─► 9 dedektör ─► signal:add
-  │                     └─ Strategy.analyzeOrderBook (20 strateji)
-  │                     └─ FlowEngine.tick + PaperTrading.update
-  ├─ @aggTrade ────► TradeEngine.addTrade ─► CVD + VPIN ─► trade:update
-  │                     └─ FlowEngine.updateBucket ─► flow:update
-  │                     └─ Strategy.processTrade
-  ├─ @ticker ──────► STATE.priceChange24h
-  └─ @forceOrder ──► TradeEngine.addLiquidation ─► liquidation:update
+Binance Futures WS (4 combined stream)
+  @ticker      → marketData (fiyat/24s/hacim) + manageOpenPositions + checkAutoCloseSignals
+  @depth20@100ms → orderBook → heatmap.draw + spoofDetector + 20 strateji.analyzeOrderBook
+  @kline_{tf}  → candles + chart.updateRealtime; kapanışta: checkPendingSignals + indikatörler
+  @aggTrade    → 20 strateji.processTrade
 
-REST:
-  /fapi/v1/depth   → snapshot (bağlantı öncesi)
-  /fapi/v1/klines  → mum geçmişi (1m, 200 mum)
-  /fapi/v1/premiumIndex → funding rate stratejisi
-  Bybit/OKX/MEXC   → 3s polling → exchanges:update
+REST: /fapi/v1/klines (500 mum + MTF 5m/15m/1h/4h)
 
-Sinyal zinciri:
-  detector/strateji → signal:add → SignalEngine.addSignal
-    → dedup + confidence haircut → signal:updated (UI)
-    → updateNarrative → narrative:update
-    → generateTradePlan → plan:update (entry/SL/TP1/TP2, RR≥2.5)
-    → calculateMicroOptimizer → microoptimizer:update (Kelly)
-    → PaperTradingEngine.simulateFromPlan → paper:open
+Strateji → ConfluenceEngine.propose
+  decay = e^(-ageSec/3) × Bayes ağırlığı × skor
+  MTF: trend 'down' → buyScore×0.6
+  gating cezası (spread>0.1% / derinlik<$50K / slippage)
+  eşik (ayar + panteon mod delta) + yön marjı + cooldown + histerezis
+  → generateFinalSignal → pending (mum onayı) → activateSignal
 
-Confluence zinciri (UTC):
-  Strategy.propose → ConfluenceEngine.propose
-    → zaman çürümesi e^(-age/3) × Bayes ağırlığı × skor
-    → gating (spread≤0.1%, depth≥$50K), cooldown, histerezis, yön marjı
-    → onConfluenceSignal → signal + plan + paper trade
+activateSignal → marker + bildirim + TTS + efekt + dinamik boyut
+TP/SL takibi → checkAutoCloseSignals (BE 0.8R, trailing 1.5R→0.5R)
+Sonuç → Panteon itibar + Bayes α/β + CUSUM + kill switch kontrolü
 ```
 
-## 2. Modül Bağımlılık Diyagramı
+## 2. Modül Bağımlılıkları
 
 ```
-                    ┌──────────────┐
-                    │  App.js      │ (orchestrator, tümünü kurar)
-                    └──┬────┬───┬──┘
-           EventBus ◄───┘    │   └────────────► RenderEngine ─► renderer'lar
-              ▲             │
-              │        ┌────▼─────┐
-  engines ◄───┼────────┤ Exchange │──► BinanceStream / Mock / Zebani
-  detectors ──┼────────► Manager  │
-  strategies ─┼────────► (data)   │
-              │        └──────────┘
-  confluence ──┘
-  (ConfluenceEngine ← BayesianWeighting ← MultiTimeframeManager)
-  (RiskGuardian / PositionManager / CUSUM)
-  (PantheonManager ← TheOracle ← PantheonEffects)
-  (StorageService ← StorageBridge ← Migration)
+App.js (UltimateTradingCommandCenter)
+ ├─ strategies (20) → ConfluenceEngine → App.activateSignal
+ ├─ risk: RiskGuardian / SpoofDetector / SessionProfiler / CUSUM / PositionManager
+ ├─ panteon: PantheonManager (3 elçi)
+ ├─ render: ChartManager / HeatmapManager / EffectsManager
+ ├─ ui: UIController / NotificationService / TtsService
+ ├─ data: ExchangeManager (BinanceStream + Mock)
+ └─ storage: DBManager → StorageBridge → Migration
 ```
 
-## 3. Önemli Tasarım Kararları
-
-| Karar | Gerekçe |
-|---|---|
-| **Vanilla JS ES Modules** | Kaynak kodlar saf JS sınıfları; framework dayatmadan birebir taşıma |
-| **Vite bundler** | ES module → tek bundle; Capacitor webDir uyumlu; dev server |
-| **Capacitor (native kabuk)** | Aynı kod tabanından gerçek `.apk`; Android SDK gerekmez (CI üretir) |
-| **CDN'siz chart** | Mobil offline çalışma; Lightweight Charts yerine özel canvas çizimi |
-| **Mock fallback** | CORS/ağ hatasında terminal asla boş kalmaz (BOZOK §11) |
-| **IndexedDB + localStorage** | Write-through cache (StorageBridge) ile senkron O(1) okuma |
-
-## 4. Döngüler
+## 3. Döngüler
 
 | Döngü | Periyot | Görev |
 |---|---|---|
-| rAF | ~16ms | RenderEngine.renderAll (100ms throttle) |
-| Timer | 250ms | flow.tick, paper.update |
-| Timer | 1s | stale kontrol, UI durum |
-| Timer | 5s | sinyal decay/expiry, strateji periodicAnalyze, Oracle, oto-toggle, kill switch |
-| Timer | 60s | Panteon durgunluk, kline tazeleme |
+| render | 500ms | ticker, sinyal barları, kehanet paneli |
+| analysis | 5s | strateji periodicAnalyze + oto-toggle + panteon durgunluk |
+| session | 60s | seans tespiti |
+| countdown | 1s | mum kapanış sayacı |
+| performance | 60s | oto-optimizasyon |
 
-## 5. Kaynak Eşleme Tablosu
+## 4. Kaynak Eşleme
 
-Detaylı eşleme için [PLAN.md §4](./../PLAN.md) bölümüne bakın. Özet:
-
-- BOZOK §2-15 → `core/`, `engines/`, `detectors/`, `render/`, `data/`, `ui/`, `storage/`
-- UTC §4-20 → `strategies/`, `confluence/`, `risk/`, `panteon/`, `indicators/`
+Tek referans: **barva35.html** — tüm sınıf/metot/formül birebir taşındı.
+Detay: [PLAN.md §3](../PLAN.md)

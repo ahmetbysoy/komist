@@ -1,145 +1,140 @@
 /**
- * PantheonManager — Mitolojik itibar motoru
- * Kaynak: UTC v2.0 §13 + GPTE.HTML
+ * PantheonManager — Mitolojik itibar motoru (barva35.html referansı)
+ * 3 elçi: Metatron (bilgelik), Uriel (cesaret), Raphael (şifa)
  *
- *  - 5 elçi: Metatron, Uriel, Raphael, Gabriel, Michael
- *  - Reputation: [-100, +100]
- *  - Modlar: İnançlı (rep ≥ 20) / Şüpheci / Kıyamet (rep ≤ -10)
- *  - Mod parametreleri: thresholdDelta, cooldownScale, rrMultiplier
- *  - Fısıltı (whisper): 30dk süreli bias
- *  - Durgunluk cezası: 4 saat işlem yoksa tüm elçilere -1
+ * İtibar güncelleme (barva35):
+ *  TP → katkıda bulunan elçi +3, Raphael her zaman +1
+ *  SL → tüm elçiler -1, katkıda bulunan elçi ekstra -2
+ * Modlar: rep ≥ 80 → İNANÇLI, ≥ 50 → ŞÜPHECİ, < 50 → KIYAMET
+ * Kehanet (prophecy): DEFENSIVE/AGGRESSIVE/NEUTRAL → tempBonus
+ * Durgunluk: 4 saat işlem yok → tüm elçilere -1
  */
 import { CONFIG } from '../core/Config.js';
-import { STATE } from '../core/State.js';
-import { clamp } from '../core/Utils.js';
 import { Logger } from '../core/Logger.js';
 
-export const AMBASSADOR_NAMES = ['metatron', 'uriel', 'raphael', 'gabriel', 'michael'];
+export const ELCI_NAMES = ['metatron', 'uriel', 'raphael'];
 
-const MODE_PARAMS = {
-  İnançlı: { thresholdDelta: -0.25, cooldownScale: 0.92, rrMultiplier: 1.05 },
-  Şüpheci: { thresholdDelta: 0.00, cooldownScale: 1.00, rrMultiplier: 1.00 },
-  Kıyamet: { thresholdDelta: 0.40, cooldownScale: 1.12, rrMultiplier: 0.95 }
+const MODE_WEIGHTS = {
+  İNANÇLI: { thresholdDelta: -0.25, cooldownScale: 0.92, rrMultiplier: 1.05 },
+  ŞÜPHECİ: { thresholdDelta: 0.00, cooldownScale: 1.00, rrMultiplier: 1.00 },
+  KIYAMET: { thresholdDelta: 0.40, cooldownScale: 1.12, rrMultiplier: 0.95 }
 };
 
 export class PantheonManager {
   constructor(bot) {
     this.bot = bot;
-    this.state = {
-      ambassadors: Object.fromEntries(AMBASSADOR_NAMES.map((n) => [
-        n, { name: n, reputation: 0, mode: 'Şüpheci', tempBonus: 0, lastActive: Date.now() }
-      ])),
-      missionaries: { spoof: { score: 50 }, cusum: { score: 50 }, mtf: { score: 50 } }
+    this.elciler = {
+      metatron: { name: 'Metatron', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 },
+      uriel: { name: 'Uriel', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 },
+      raphael: { name: 'Raphael', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 }
     };
-    this.whisper = { bias: 0, until: 0 };
+    this.lastActivityTimestamp = Date.now();
   }
 
-  load(state) {
-    if (state) this.state = { ...this.state, ...state };
-    this._recalcModes();
+  /** Strateji → elçi eşlemesi (bot.strategyAmbassadors) */
+  getStrategyAmbassador(strategyKey) {
+    return this.bot.strategyAmbassadors?.[strategyKey]?.ambassador ?? null;
   }
 
-  serialize() {
-    return this.state;
-  }
+  /** Sinyal sonucu → itibar (barva35 updateReputation) */
+  updateReputation(signalResult) {
+    this.lastActivityTimestamp = Date.now();
+    const contributingElci = this.getStrategyAmbassador(signalResult.strategy);
 
-  getMode(name) {
-    return this.state.ambassadors[name]?.mode || 'Şüpheci';
-  }
-
-  /** Sinyal sonucu itibar güncelle (TP/SL) */
-  onSignalResult(result) {
-    const w = CONFIG.panteon.reputationWeights;
-    const contributors = result.contributors || [];
-    const isWin = result.status === 'tp';
-
-    for (const name of AMBASSADOR_NAMES) {
-      const a = this.state.ambassadors[name];
-      if (isWin) {
-        // TP: katkıda bulunan elçi +1, Raphael her zaman +0.5
-        const delta = contributors.includes(name) ? w.tpContributor : 0;
-        const raphael = name === 'raphael' ? w.tpRaphael : 0;
-        a.reputation = clamp(a.reputation + delta + raphael, -100, 100);
-      } else {
-        // SL: tümü -2, sorumlu elçi ekstra -3
-        a.reputation = clamp(a.reputation + w.slAll, -100, 100);
-        if (contributors[0] === name) {
-          a.reputation = clamp(a.reputation + w.slResponsibleExtra, -100, 100);
-        }
+    if (signalResult.outcome === 'tp') {
+      if (contributingElci && this.elciler[contributingElci]) {
+        this.elciler[contributingElci].reputation += 3;
       }
-      a.lastActive = Date.now();
+      this.elciler.raphael.reputation += 1;   // Şifacı her zaman küçük bonus
+      Logger.info('Panteon', `TP → ${contributingElci || '?'} +3, Raphael +1`);
+    } else if (signalResult.outcome === 'sl') {
+      for (const key of ELCI_NAMES) this.elciler[key].reputation -= 1;
+      if (contributingElci && this.elciler[contributingElci]) {
+        this.elciler[contributingElci].reputation -= 2;
+      }
+      Logger.info('Panteon', `SL → tümü -1, ${contributingElci || '?'} ekstra -2`);
     }
-    this._recalcModes();
+
+    // Clamp [0, 150]
+    const { min, max } = CONFIG.defaultSettings.panteon.reputationBounds;
+    for (const key of ELCI_NAMES) {
+      this.elciler[key].reputation = Math.max(min, Math.min(max, this.elciler[key].reputation));
+    }
+
+    this.updateAllModes();
     this.bot.savePanteonState?.();
-    this.bot.onReputationChange?.();
+    this.bot.updatePanteonUI?.();
   }
 
-  /** Durgunluk: 4 saat işlem yok → tümü -1 */
-  checkInactivity() {
-    const hours = CONFIG.panteon.dormancyHours;
-    const nowMs = Date.now();
-    let changed = false;
-    for (const name of AMBASSADOR_NAMES) {
-      const a = this.state.ambassadors[name];
-      if (nowMs - a.lastActive > hours * 3600000) {
-        a.reputation = clamp(a.reputation + CONFIG.panteon.reputationWeights.dormancyPenalty, -100, 100);
-        changed = true;
-      }
-    }
-    if (changed) {
-      this._recalcModes();
-      this.bot.savePanteonState?.();
+  /** Mod hesaplama (barva35 updateAllModes) */
+  updateAllModes() {
+    for (const key of ELCI_NAMES) {
+      const elci = this.elciler[key];
+      const total = Math.max(0, elci.reputation + elci.tempBonus);
+      if (total >= 80) elci.mode = 'İNANÇLI';
+      else if (total >= 50) elci.mode = 'ŞÜPHECİ';
+      else elci.mode = 'KIYAMET';
     }
   }
 
-  /** Fısıltı: 30dk süreli yön biası */
+  /** Kehanet uygula (barva35 applyProphecy) — tempBonus ayarlar */
   applyProphecy(prophecy) {
     // DEFENSIVE / AGGRESSIVE / NEUTRAL
-    this.whisper.bias = prophecy === 'DEFENSIVE' ? -0.2
-      : prophecy === 'AGGRESSIVE' ? 0.2 : 0;
-    this.whisper.until = Date.now() + CONFIG.panteon.whisperTtlMs;
+    const bonus = prophecy === 'DEFENSIVE' ? 10 : prophecy === 'AGGRESSIVE' ? -10 : 0;
+    for (const key of ELCI_NAMES) this.elciler[key].tempBonus = bonus;
+    this.updateAllModes();
     this.bot.savePanteonState?.();
+    this.bot.updatePanteonUI?.();
+    Logger.info('Panteon', `Kehanet: ${prophecy} (tempBonus ${bonus})`);
   }
 
-  getWhisperBias() {
-    if (Date.now() > this.whisper.until) return 0;
-    return this.whisper.bias;
+  /** Durgunluk: 4 saat işlem yok → tümü -1 (barva35 checkInactivity) */
+  checkInactivity() {
+    const hours = CONFIG.defaultSettings.panteon.dormancyHours;
+    if (Date.now() - this.lastActivityTimestamp > hours * 3600000) {
+      for (const key of ELCI_NAMES) this.elciler[key].reputation -= 1;
+      this.updateAllModes();
+      this.bot.savePanteonState?.();
+      this.bot.updatePanteonUI?.();
+      Logger.info('Panteon', `${hours} saat durgunluk — tüm elçiler -1`);
+    }
   }
 
-  /** Mood modları → sistem parametrelerine çevir */
-  _combinedThresholdDelta() {
-    const sum = AMBASSADOR_NAMES.reduce((s, n) =>
-      s + (MODE_PARAMS[this.state.ambassadors[n].mode]?.thresholdDelta ?? 0), 0);
-    return clamp(sum + this.getWhisperBias(), -1.0, 1.0);
+  getElciMode(name) {
+    return this.elciler[name]?.mode ?? 'ŞÜPHECİ';
+  }
+
+  /** Mod çarpanları (Confluence eşik için) */
+  getThresholdDelta() {
+    return ELCI_NAMES.reduce((s, k) => s + (MODE_WEIGHTS[this.elciler[k].mode]?.thresholdDelta ?? 0), 0);
   }
 
   getCooldownScale() {
-    return AMBASSADOR_NAMES.reduce((p, n) =>
-      p * (MODE_PARAMS[this.state.ambassadors[n].mode]?.cooldownScale ?? 1), 1);
+    return ELCI_NAMES.reduce((p, k) => p * (MODE_WEIGHTS[this.elciler[k].mode]?.cooldownScale ?? 1), 1);
   }
 
   getRRMultiplier() {
-    return AMBASSADOR_NAMES.reduce((p, n) =>
-      p * (MODE_PARAMS[this.state.ambassadors[n].mode]?.rrMultiplier ?? 1), 1);
+    return ELCI_NAMES.reduce((p, k) => p * (MODE_WEIGHTS[this.elciler[k].mode]?.rrMultiplier ?? 1), 1);
   }
 
-  _recalcModes() {
-    const { inanc, kiyamet } = CONFIG.panteon.modeThresholds;
-    for (const name of AMBASSADOR_NAMES) {
-      const a = this.state.ambassadors[name];
-      a.mode = a.reputation >= inanc ? 'İnançlı'
-        : a.reputation <= kiyamet ? 'Kıyamet' : 'Şüpheci';
+  getElciler() {
+    return ELCI_NAMES.map((k) => ({ ...this.elciler[k], key: k }));
+  }
+
+  loadState(state) {
+    if (state?.elciler) {
+      this.elciler = { ...this.elciler, ...state.elciler };
+      this.lastActivityTimestamp = state.lastActivityTimestamp || Date.now();
     }
+    this.updateAllModes();
   }
 
-  getAmbassadorList() {
-    return AMBASSADOR_NAMES.map((n) => ({
-      name: n,
-      reputation: this.state.ambassadors[n].reputation,
-      mode: this.state.ambassadors[n].mode
-    }));
+  serialize() {
+    return {
+      elciler: this.elciler,
+      lastActivityTimestamp: this.lastActivityTimestamp
+    };
   }
 }
 
 export default PantheonManager;
-export { MODE_PARAMS };
