@@ -287,7 +287,10 @@ body.fullscreen-chart #chart-countdown-overlay { display: block !important; }
 /* ═══ MOBİL (768px) ═══ */
 @media screen and (max-width: 768px) {
   .desktop-only { display: none !important; }
-  .header { order: 2; position: fixed; bottom: 0; left: 5px; right: 5px; z-index: 1000; margin: 5px; border-radius: 8px; }
+  .header { order: 2; position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; margin: 0; border-radius: 16px 16px 0 0; backdrop-filter: blur(16px); box-shadow: 0 -4px 20px rgba(0,0,0,0.4); border-top: 1px solid var(--border-color); }
+  .header-top-bar { padding: 8px 12px; min-height: 48px; }
+  .header-top-bar .btn { min-width: 48px; min-height: 44px; border-radius: 12px; font-size: 14px; }
+  .header-top-bar .btn:active { transform: scale(0.95); }
   .header-top-bar { min-height: 36px; }
   .header-collapsible-content { max-height: 55vh; overflow-y: auto; }
   body.header-collapsed .header-collapsible-content { max-height: 0; }
@@ -298,3 +301,12 @@ body.fullscreen-chart #chart-countdown-overlay { display: block !important; }
   .price-display { grid-template-columns: repeat(2, 1fr); }
   #orderbook-heatmap { height: 110px; }
 }
+
+/* Akordeon Ayarlar (BÖLÜM 3) */
+.settings-group { border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+.settings-group .panel-title { cursor: pointer; padding: 10px 12px; margin: 0; border-bottom: none; background: var(--hover-bg); display: flex; justify-content: space-between; align-items: center; }
+.settings-group .panel-title::after { content: '▼'; font-size: 8px; transition: transform 0.3s; }
+.settings-group.collapsed .panel-title::after { transform: rotate(-90deg); }
+.settings-group.collapsed .form-group { display: none; }
+.settings-group .form-group { padding: 0 12px; }
+.settings-group .form-group:first-of-type { padding-top: 8px; }

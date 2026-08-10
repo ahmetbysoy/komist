@@ -125,6 +125,19 @@ export class UIController {
     // Grafiktir sinyallerini sil
     $('clear-markers-btn')?.addEventListener('click', () => this.bot.chartManager?.clearMarkers());
 
+    // Akordeon Ayarlar (BÖLÜM 3) — panel-title'a tıklayınca grubu aç/kapat
+    document.querySelectorAll('.settings-group .panel-title').forEach(title => {
+      title.style.cursor = 'pointer';
+      title.addEventListener('click', () => {
+        const group = title.closest('.settings-group');
+        if (group) group.classList.toggle('collapsed');
+      });
+    });
+    // İlk yüklemede ilk 2 grup açık, diğerleri kapalı
+    document.querySelectorAll('.settings-group').forEach((g, i) => {
+      if (i > 1) g.classList.add('collapsed');
+    });
+
     // Patch #7: Şeref Tablosu / Banlılar
     $('honor-board-btn')?.addEventListener('click', () => this.bot.openHonorModal());
     $('banned-board-btn')?.addEventListener('click', () => this.bot.openHonorModal('banned'));
@@ -293,6 +306,17 @@ export class UIController {
   }
 
   setView(view) {
+    // Alt nav aktif durumu
+    document.querySelectorAll('#chart-view-btn, #heatmap-view-btn, #mobile-chart-view-btn, #mobile-heatmap-view-btn').forEach(btn => {
+      btn.classList.remove('active');
+      if ((view === 'chart' && btn.id.includes('chart')) || (view === 'heatmap' && btn.id.includes('heatmap'))) {
+        btn.style.borderColor = 'var(--primary)';
+        btn.style.background = 'var(--hover-bg)';
+      } else {
+        btn.style.borderColor = '';
+        btn.style.background = '';
+      }
+    });
     STATE.activeView = view;
     const chartView = $('chart-container-view');
     const heatView = $('heatmap-container-view');
