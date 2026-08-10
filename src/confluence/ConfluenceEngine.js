@@ -66,7 +66,13 @@ export class ConfluenceEngine {
     const reverseHys = cd.reverseHysteresisPoints ?? 2;
     const dirMargin = settings.optimization?.dirMargin ?? 0.5;
 
-    if (now - this.lastSignalTime < signalCooldown) return;
+    // Faz A #12: Panteon cooldownScale -> sinyal cooldown'larına uygula
+    const panteonScale = this.bot.panteon?.getCooldownScale?.() ?? 1;
+    const signalCooldownAdj = Math.round(signalCooldown * panteonScale);
+    const sameDirCooldownAdj = Math.round(sameDirCooldown * panteonScale);
+    const oppCooldownAdj = Math.round(oppCooldown * panteonScale);
+
+    if (now - this.lastSignalTime < signalCooldownAdj) return;
     this.proposals = this.proposals.filter((p) => now - p.timestamp < proposalTimeout);
     if (this.proposals.length === 0) return;
 
@@ -83,7 +89,7 @@ export class ConfluenceEngine {
       if (mtfTrend === 'up') sellScoreAdj *= 0.6;
     }
 
-    // Gating cezası
+    // Gating cezası — Faz B #1: artık yön bağımlı spoof cezası da içeriyor
     const gatingEnabled = settings.optimization?.gating?.enabled;
     if (gatingEnabled) {
       buyScoreAdj -= this.bot.marketGatingPenalty?.('buy') || 0;
@@ -101,14 +107,14 @@ export class ConfluenceEngine {
     this.sellScore = sellScoreAdj;
 
     if (buyScoreAdj >= minThreshold && buyScoreAdj > sellScoreAdj + dirMargin) {
-      if (now - (this.lastSignalTimeByDirection.buy || 0) < sameDirCooldown) return;
-      if (this.lastDirection === 'sell' && (now - this.lastSignalTime) < oppCooldown) {
+      if (now - (this.lastSignalTimeByDirection.buy || 0) < sameDirCooldownAdj) return;
+      if (this.lastDirection === 'sell' && (now - this.lastSignalTime) < oppCooldownAdj) {
         if (buyScoreAdj < minThreshold + reverseHys) return;
       }
       this.generateFinalSignal('buy', buy.contributors, buyScoreAdj);
     } else if (sellScoreAdj >= minThreshold && sellScoreAdj > buyScoreAdj + dirMargin) {
-      if (now - (this.lastSignalTimeByDirection.sell || 0) < sameDirCooldown) return;
-      if (this.lastDirection === 'buy' && (now - this.lastSignalTime) < oppCooldown) {
+      if (now - (this.lastSignalTimeByDirection.sell || 0) < sameDirCooldownAdj) return;
+      if (this.lastDirection === 'buy' && (now - this.lastSignalTime) < oppCooldownAdj) {
         if (sellScoreAdj < minThreshold + reverseHys) return;
       }
       this.generateFinalSignal('sell', sell.contributors, sellScoreAdj);
@@ -151,6 +157,31 @@ export class ConfluenceEngine {
     if (STRATEGY_GROUPS.trending.includes(strategy)) return 'trending';
     if (STRATEGY_GROUPS.meanReversion.includes(strategy)) return 'meanReversion';
     return 'neutral';
+  }
+
+  /**
+   * Faz A #4: Slippage ölçümü — 2sn sonra çağrılır, yüksek slippage ise 30sn boyunca gating cezası
+   * @param {number} entryPrice sinyal giriş fiyatı
+   */
+  measureSlippage(entryPrice) {
+    const current = this.bot.marketData?.price;
+    if (!entryPrice || !current) return;
+    const slip = Math.abs(current - entryPrice) / entryPrice;
+    // %0.1 üstü slippage = yüksek kabul et
+    if (slip > 0.001) {
+      this.bot.slippageHighUntil = Date.now() + 30000;
+      // Logger varsa kullan
+      try { Logger.warn('Confluence', `Yüksek slippage: ${(slip*100).toFixed(3)}% (entry ${entryPrice} -> now ${current})`); } catch(_){}
+    }
+  }
+
+  /**
+   * Faz B #1 + #12: Cooldown ölçeği ve Panteon etkisi için yardımcı
+   * Panteon KIYAMET modunda cooldown uzar, İNANÇLI'da kısalır.
+   */
+  _applyPanteonCooldown(baseMs) {
+    const scale = this.bot.panteon?.getCooldownScale?.() ?? 1;
+    return Math.round(baseMs * scale);
   }
 
   reset() {

@@ -42,6 +42,9 @@ export class PositionManager {
     const slDist = atrVal * atrMult;
 
     let rr = this.bot.settings?.params?.rrRatio ?? 1.5;
+    // Faz A #12: Panteon RR çarpanı (İNANÇLI 1.05, KIYAMET 0.95) -> TP mesafesini etkiler
+    const panteonRR = this.bot.panteon?.getRRMultiplier?.() ?? 1;
+    rr *= panteonRR;
     if (regime === 'trend') rr *= 1.1;
     if (regime === 'range') rr *= 0.95;
     rr *= 1 + Math.min(0.3, (score - (this.bot.settings?.confluenceThreshold ?? 3)) / 10);
@@ -55,46 +58,14 @@ export class PositionManager {
   }
 
   /**
-   * Açık pozisyonları yönet (barva35 manageOpenPositions)
-   * Her ticker/kline güncellemesinde çağrılır.
+   * @deprecated Faz A #2: Bu metod artık no-op. Pozisyon takibi App.checkAutoCloseSignals() üzerinden signals dizisi ile yapılıyor.
+   * Geriye dönük uyum için boş bırakıldı; PositionManager sadece calculateLevels() için kullanılıyor.
+   * signals[] TEK kaynak, positions[] ölü sistem kaldırıldı.
    */
   manageOpenPositions() {
-    const be = this.bot.settings?.breakeven ?? { beAtR: 0.8, trailAfterR: 1.5, trailToR: 0.5 };
-    const enabled = this.bot.settings?.features?.enableBreakevenTrail;
-    const price = STATE.marketData.price;
-    if (!price || !this.bot.positions?.length) return;
-
-    for (const pos of this.bot.positions) {
-      if (pos.status !== 'open') continue;
-      const risk = Math.abs(pos.entryPrice - pos.stopLoss) || 1;
-      const rNow = pos.direction === 'buy'
-        ? (price - pos.entryPrice) / risk
-        : (pos.entryPrice - price) / risk;
-      pos.mfeR = Math.max(pos.mfeR || 0, rNow);
-
-      if (enabled === false) continue;
-
-      // Breakeven
-      if (pos.mfeR >= be.beAtR) {
-        pos.stopLoss = pos.direction === 'buy'
-          ? Math.max(pos.stopLoss, pos.entryPrice)
-          : Math.min(pos.stopLoss, pos.entryPrice);
-      }
-      // Trailing
-      if (pos.mfeR >= be.trailAfterR) {
-        const trail = this._currentAtr() * 0.5;
-        const candidate = pos.direction === 'buy'
-          ? price - trail
-          : price + trail;
-        pos.stopLoss = pos.direction === 'buy'
-          ? Math.max(pos.stopLoss, candidate)
-          : Math.min(pos.stopLoss, candidate);
-        // SL, TP'yi geçemez
-        pos.stopLoss = pos.direction === 'buy'
-          ? Math.min(pos.stopLoss, pos.takeProfit)
-          : Math.max(pos.stopLoss, pos.takeProfit);
-      }
-    }
+    // NO-OP: breakeven/trailing artık App.checkAutoCloseSignals içinde signals üzerinden yönetiliyor
+    // Eski positions[] sistemi kullanılmıyor — STATE.positions boş tutuluyor
+    return;
   }
 }
 

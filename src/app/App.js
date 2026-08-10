@@ -48,9 +48,11 @@ export class UltimateTradingCommandCenter {
     this.storage = new StorageBridge(this.db);
 
     // ── Ayarlar & durum ────────────────────────────────
-    this.settings = this._loadSettings() || structuredClone(DEFAULT_SETTINGS);
-    this.currentSymbol = this.storage.getJsonSync('utc_current_symbol') || CONFIG.defaultSymbol;
-    this.currentTimeframe = this.storage.getJsonSync('utc_current_timeframe') || CONFIG.defaultTimeframe;
+    // NOT: storage henüz ready değil (async init'te yüklenecek), burada sadece default kullan
+    this.settings = structuredClone(DEFAULT_SETTINGS);
+    // StorageBridge ready olmadan getJsonSync hep null döner -> default kullan, init() içinde gerçek değer yüklenecek
+    this.currentSymbol = CONFIG.defaultSymbol;
+    this.currentTimeframe = CONFIG.defaultTimeframe;
     this.headerCollapsed = true;
     this.currentMainView = 'chart';
     this.runtimeThresholdOffset = 0;
@@ -66,10 +68,12 @@ export class UltimateTradingCommandCenter {
     this.signals = [];
     this.pendingSignals = [];
     this.stats = { total: 0, tp: 0, sl: 0 };
-    this.strategyStats = this.storage.getJsonSync('utc_strategy_stats') || this.initDefaultStrategyStats();
+    // strategyStats storage ready olmadan okunamaz -> default init, gerçek veri async init() içinde yüklenecek
+    this.strategyStats = this.initDefaultStrategyStats();
     this.shadowProposals = [];
     this.marketRegime = 'unknown';
-    this.positions = [];
+    // REMOVED: this.positions = [] -> ölü sistem (Faz A #2). Pozisyon takibi signals üzerinden (checkAutoCloseSignals) yapılıyor.
+    // PositionManager.manageOpenPositions() artık no-op / deprecated. Geriye dönük uyum için boş dizi bırakma, tamamen kaldırıldı.
 
     // ── Strateji haritaları (barva35) ──────────────────
     this.strategyAmbassadors = STRATEGY_AMBASSADORS;
@@ -86,7 +90,7 @@ export class UltimateTradingCommandCenter {
     this.cusumDetector = new CUSUMDriftDetector();
     this.positionManager = new PositionManager(this);
     this.panteon = new PantheonManager(this);
-    this.panteon.loadState(this.storage.getJsonSync('pantheon_state'));
+    // panteon_state de async init() içinde yüklenecek (storage ready sonrası)
 
     this.exchange = new ExchangeManager(this);
     this.chartManager = new ChartManager('live-chart');
@@ -121,10 +125,33 @@ export class UltimateTradingCommandCenter {
     await Migration.runOnce(this.db);
     await this.storage.init();
 
-    // Kalıcı sinyal/stats geri yükle
+    // ── Faz A #7 + #8: Ayarlar & kalıcılık tek kaynak StorageBridge üzerinden ──
+    // Constructor'da default yüklenmişti, şimdi storage ready -> gerçek kalıcı veriyi yükle
+    const persistedSettings = this.storage.getJsonSync('utc_settings');
+    if (persistedSettings) {
+      this.settings = { ...structuredClone(DEFAULT_SETTINGS), ...persistedSettings };
+    }
+    // Sembol/timeframe kalıcılığı (Faz A #8)
+    this.currentSymbol = this.storage.getJsonSync('utc_current_symbol') || CONFIG.defaultSymbol;
+    this.currentTimeframe = this.storage.getJsonSync('utc_current_timeframe') || CONFIG.defaultTimeframe;
+    this.marketData.symbol = this.currentSymbol;
+    STATE.symbol = this.currentSymbol;
+    STATE.timeframe = this.currentTimeframe;
+
+    // strategyStats kalıcılığı (Faz A #8)
+    const persistedStats = this.storage.getJsonSync('utc_strategy_stats');
+    if (persistedStats) this.strategyStats = persistedStats;
+
+    // Kalıcı sinyal/stats geri yükle + STATE senkronizasyonu (Faz A #1)
     this.signals = this.storage.getJsonSync('utc_signals') || [];
     this.stats = this.storage.getJsonSync('utc_stats') || { total: 0, tp: 0, sl: 0 };
+    STATE.stats = { ...this.stats };
+    STATE.signals = this.signals;
+    // Faz A #2: positions ölü sistem kaldırıldı -> STATE.positions boş tutuluyor (geriye dönük uyum)
+    STATE.positions = [];
     this.panteon.loadState(this.storage.getJsonSync('pantheon_state'));
+    // Panteon modları yüklendikten sonra threshold/cooldown etkileri güncel kalsın
+    STATE.strategyStats = this.strategyStats;
 
     document.body.classList.add('header-collapsed');
     this.effects.start();
@@ -214,13 +241,20 @@ export class UltimateTradingCommandCenter {
   }
 
   _applyTicker(data) {
-    this.marketData.price = parseFloat(data.c);
+    const price = parseFloat(data.c);
+    // Faz A #3: ZebaniFilter bad-tick filtresi — veri akışına bağlandı
+    if (this.exchange?.zebani && !this.exchange.zebani.check(price)) {
+      Logger.warn('Zebani', `Bad tick filtrelendi (ticker): ${price} — işlem yapılmadı`);
+      return;
+    }
+    this.marketData.price = price;
     this.marketData.change24h = parseFloat(data.P);
     this.marketData.volume24h = parseFloat(data.q);
     this.marketData.symbol = data.s;
-    if (data.s === 'BTCUSDT') this.marketData.btcPrice = parseFloat(data.c);
+    if (data.s === 'BTCUSDT') this.marketData.btcPrice = price;
     STATE.marketData = this.marketData;
-    this.positionManager.manageOpenPositions();
+    // Faz A #2: PositionManager.manageOpenPositions() ölü kod -> kaldırıldı (signals üzerinden checkAutoCloseSignals kullanılıyor)
+    // this.positionManager.manageOpenPositions(); // DEPRECATED
     this.checkAutoCloseSignals();
     this.ui.updateTicker();
     this.ui.updatePriceDisplay();
@@ -257,7 +291,8 @@ export class UltimateTradingCommandCenter {
       this.checkPendingSignals(candle);
       this.calculateAllIndicators();
     }
-    this.positionManager.manageOpenPositions();
+    // Faz A #2: manageOpenPositions deprecated -> kaldırıldı
+    // this.positionManager.manageOpenPositions();
     this.checkAutoCloseSignals();
   }
 
@@ -349,6 +384,17 @@ export class UltimateTradingCommandCenter {
       if (grp === 'trending') boost *= 1.05;
       if (grp === 'meanReversion') boost *= 0.95;
     }
+    // Faz B #3: SessionProfiler -> seans bazlı boost (Asya: meanReversion, NY: trending)
+    const session = this.sessionProfiler?.current;
+    if (session === 'ASYA') {
+      if (grp === 'meanReversion') boost *= 1.08;
+      if (grp === 'trending') boost *= 0.96;
+    } else if (session === 'NEW YORK') {
+      if (grp === 'trending') boost *= 1.08;
+      if (grp === 'meanReversion') boost *= 0.97;
+    } else if (session === 'LONDRA') {
+      if (grp === 'trending') boost *= 1.05;
+    }
     return boost;
   }
 
@@ -359,8 +405,8 @@ export class UltimateTradingCommandCenter {
     return base + moodDelta + (this.runtimeThresholdOffset || 0);
   }
 
-  /** Piyasa gating cezası (barva35 marketGatingPenalty) */
-  marketGatingPenalty() {
+  /** Piyasa gating cezası (barva35 marketGatingPenalty) — Faz B entegrasyon: spoof cezası eklendi */
+  marketGatingPenalty(direction = null) {
     const g = this.settings.optimization?.gating || { spreadMaxPct: 0.001, minDepthUsd: 50000 };
     const price = this.marketData.price;
     const book = this.orderBook;
@@ -376,6 +422,15 @@ export class UltimateTradingCommandCenter {
     if (spreadPct > g.spreadMaxPct) penalty += 1.0;
     if (depthUsd < g.minDepthUsd) penalty += 1.0;
     if (Date.now() < this.slippageHighUntil) penalty += 1.0;
+    // Faz B #1: Spoof tespiti -> gating cezası (30sn penceresi)
+    if (this.lastSpoofTime && Date.now() - this.lastSpoofTime < 30000) {
+      penalty += 1.0;
+      // Yön bağımlı ceza: bid spoof (sahte alım) -> buy yönünü daha fazla cezalandır, ask spoof -> sell
+      if (this.lastSpoofType) {
+        if (direction === 'buy' && this.lastSpoofType === 'bid') penalty += 0.5;
+        if (direction === 'sell' && this.lastSpoofType === 'ask') penalty += 0.5;
+      }
+    }
     return penalty;
   }
 
@@ -419,12 +474,13 @@ export class UltimateTradingCommandCenter {
     this.pendingSignals = remaining;
   }
 
-  /** Sinyali aktifleştir (barva35 activateSignal) */
+  /** Sinyali aktifleştir (barva35 activateSignal) — Faz A #12: panteon RR/cooldown zaten Confluence/PositionManager'da */
   activateSignal(signal) {
     signal.status = 'active';
     this.signals.unshift(signal);
     if (this.signals.length > 200) this.signals.pop();
     this.saveData('utc_signals', this.signals);
+    STATE.signals = this.signals;
     this.debouncedRender();
     this.chartManager.addSignalMarker(signal);
     this.ui.renderSignals(this.signals);
@@ -501,38 +557,63 @@ export class UltimateTradingCommandCenter {
     if (toRemove.length) {
       this.signals = this.signals.filter((s) => s.status === 'active' || s.status === 'pending');
       this.saveData('utc_signals', this.signals);
+      STATE.signals = this.signals;
       this.ui.renderSignals(this.signals);
     }
   }
 
-  /** Sinyal sonucu: panteon + istatistik + CUSUM (barva35 updateSignalResult) */
+  /** Sinyal sonucu: panteon + istatistik + CUSUM (barva35 updateSignalResult) — Faz A #1, #5, Faz B #2 düzeltmeleri */
   updateSignalResult(signal) {
     const isWin = signal.status === 'tp';
     this.stats.total += 1;
     if (isWin) this.stats.tp += 1;
     else this.stats.sl += 1;
     this.saveData('utc_stats', this.stats);
+    // Faz A #1: Kill switch için STATE.stats senkronizasyonu
+    STATE.stats = { ...this.stats };
+    STATE.signals = this.signals;
 
     // Panteon itibarı
     const contributing = signal.contributors?.[0]?.strategy || signal.reason?.split(',')[0]?.trim();
     this.panteon.updateReputation({ strategy: contributing, outcome: signal.status });
 
-    // Bayes istatistikleri (katkıda bulunan her strateji)
+    // Bayes istatistikleri (katkıda bulunan her strateji) — Faz A #5: contrib artık gerçekten artıyor
     for (const c of signal.contributors || []) {
       const s = this.strategyStats[c.strategy];
-      const target = s?.[this.marketRegime] || s?.overall;
+      if (!s) continue;
+      const regimeKey = this.marketRegime && s[this.marketRegime] ? this.marketRegime : 'overall';
+      const target = s[regimeKey] || s.overall;
+      const overall = s.overall;
       if (target) {
         if (isWin) target.alpha += 1;
         else target.beta += 1;
         target.wins = (target.wins || 0) + (isWin ? 1 : 0);
         target.losses = (target.losses || 0) + (isWin ? 0 : 1);
+        target.contrib = (target.contrib || 0) + 1;
+        target.lastUpdate = Date.now();
+        // Faz A #5: overall contrib her zaman artar (rejim özel contrib + overall)
+        if (target !== overall) {
+          overall.contrib = (overall.contrib || 0) + 1;
+          overall.lastUpdate = Date.now();
+          // overall alfa/beta da rejimden bağımsız genel öğrenme için güncellenir mi? Hayır, sadece contrib için - Bayes güncellemesi rejim bazlı kalır
+        }
+        // Shadow istatistikleri de güncelle (gölge -> canlı geçişi için)
+        if (this.strategies[c.strategy]?._isLive === false) {
+          if (isWin) target.shadowWins = (target.shadowWins || 0) + 1;
+          else target.shadowLosses = (target.shadowLosses || 0) + 1;
+        }
       }
     }
     this.saveStrategyStats();
+    STATE.strategyStats = this.strategyStats;
 
-    // CUSUM
+    // CUSUM — Faz B #2: kötü drift -> otomatik aksiyon
     if (this.settings.features.enableCUSUMDrift && this.cusumDetector.update(isWin)) {
-      this.notify.warning('CUSUM: kötü drift tespit — strateji performansı bozuluyor');
+      this.notify.warning('CUSUM: kötü drift tespit — strateji performansı bozuluyor, eşik sıkılaştırılıyor');
+      // Faz B: CUSUM drift = eşik otomatik sıkılaştır + oto shadow-ban tetikle
+      this.runtimeThresholdOffset = Math.min(1.5, (this.runtimeThresholdOffset || 0) + 0.15);
+      this.autoToggleStrategies();
+      Logger.warn('CUSUM', `Drift sonrası threshold offset: ${this.runtimeThresholdOffset.toFixed(2)}`);
     }
 
     // Efekt + bildirim
@@ -610,6 +691,12 @@ export class UltimateTradingCommandCenter {
     }
     this.autoToggleStrategies();
     this.panteon.checkInactivity();
+    // Faz A #10: SpoofDetector oto-optimizasyon artık periyodik çağrılıyor
+    if (this.settings.features.enableSpoofDetection) {
+      try { this.spoofDetector.autoOptimizeThreshold(); } catch(_) {}
+    }
+    // Faz B #6: MTF/pulse heartbeat kontrolü (veri akmıyor mu?)
+    // (Basit sağlık kontrolü: lastPrice yaşını kontrol et, gerekirse mock'a düş)
   }
 
   render() {
@@ -709,7 +796,14 @@ export class UltimateTradingCommandCenter {
   }
 
   _loadSettings() {
+    // Faz A #7: Tek kaynak StorageBridge — constructor'da storage ready değilse DEFAULT döner, gerçek yükleme init() içinde yapılır
+    // Geriye dönük uyum için localStorage fallback sadece storage ready değilken ve init öncesi acil durum için
     try {
+      if (this.storage?.ready) {
+        const fromStorage = this.storage.getJsonSync('utc_settings');
+        if (fromStorage) return { ...structuredClone(DEFAULT_SETTINGS), ...fromStorage };
+      }
+      // Fallback: sadece ilk açılışta migration öncesi eski localStorage verisi varsa (Migration zaten taşıdıysa bu dal çalışmaz)
       const raw = localStorage.getItem('utc_settings');
       if (raw) return { ...structuredClone(DEFAULT_SETTINGS), ...JSON.parse(raw) };
     } catch (_) {}

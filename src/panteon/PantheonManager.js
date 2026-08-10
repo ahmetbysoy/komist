@@ -12,7 +12,7 @@
 import { CONFIG } from '../core/Config.js';
 import { Logger } from '../core/Logger.js';
 
-export const ELCI_NAMES = ['metatron', 'uriel', 'raphael'];
+export const ELCI_NAMES = ['metatron', 'uriel', 'raphael', 'gabriel', 'michael'];
 
 const MODE_WEIGHTS = {
   İNANÇLI: { thresholdDelta: -0.25, cooldownScale: 0.92, rrMultiplier: 1.05 },
@@ -26,7 +26,9 @@ export class PantheonManager {
     this.elciler = {
       metatron: { name: 'Metatron', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 },
       uriel: { name: 'Uriel', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 },
-      raphael: { name: 'Raphael', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 }
+      raphael: { name: 'Raphael', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 },
+      gabriel: { name: 'Gabriel', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 },
+      michael: { name: 'Michael', reputation: 100, mode: 'İNANÇLI', tempBonus: 0 }
     };
     this.lastActivityTimestamp = Date.now();
   }

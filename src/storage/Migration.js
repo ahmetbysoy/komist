@@ -29,6 +29,8 @@ export class Migration {
         try {
           const parsed = JSON.parse(raw);
           await db.save(key, parsed);
+          // Faz A #7: Migration artık kaynak localStorage'ı temizliyor (tek kaynak IndexedDB kalsın)
+          localStorage.removeItem(key);
           moved++;
         } catch (e) {
           Logger.debug('Migration', `${key} taşınamadı:`, e.message);

@@ -15,6 +15,8 @@ export class SpoofDetector {
     this.COOLDOWN = 30000;              // 30sn bildirim cooldown
     this.lastNotify = {};
     this.rejectRatio = 0;
+    this.spoofCount = 0;
+    this.totalTracked = 0;
   }
 
   /**
@@ -39,6 +41,7 @@ export class SpoofDetector {
         const key = `${lv.type}-${lv.price.toFixed(2)}`;
         if (!this.trackedOrders.has(key)) {
           this.trackedOrders.set(key, { qty: lv.qty, ts: nowTs, type: lv.type });
+          this.totalTracked = (this.totalTracked || 0) + 1;
         } else {
           this.trackedOrders.get(key).ts = nowTs;
         }
@@ -67,14 +70,28 @@ export class SpoofDetector {
   _notifySpoof(info, nowTs) {
     if (nowTs - (this.lastNotify[info.type] || 0) < this.COOLDOWN) return;
     this.lastNotify[info.type] = nowTs;
+    // Faz B #1: Spoof bilgisini App'e aktar -> Confluence gating cezası için
+    if (this.bot) {
+      this.bot.lastSpoofTime = nowTs;
+      this.bot.lastSpoofType = info.type;
+      // Reject ratio için sayım
+      this.spoofCount = (this.spoofCount || 0) + 1;
+    }
     const bias = info.type === 'bid' ? 'bullish' : 'bearish'; // bid spoof çekilirse gerçekte satmak istiyorlar
     this.bot.showNotification?.(`🕵️ Spoof tespit: ${info.type.toUpperCase()} emri ${info.qty.toFixed(3)} birim çekildi!`, 'warning');
     this.bot.speak?.(`Spoof tespit edildi. ${info.type} emri çekildi.`);
     Logger.warn('Spoof', `${info.type} spoof: ${info.qty.toFixed(3)} birim çekildi`);
   }
 
-  /** Eşik oto-optimizasyonu (UTC §4.11) */
+  /** Eşik oto-optimizasyonu (UTC §4.11) — Faz A #10: artık periyodik çağrılıyor + rejectRatio gerçekten hesaplanıyor */
   autoOptimizeThreshold() {
+    // Reject ratio'yu güncelle: spoof / toplam izlenen
+    if (this.totalTracked > 20) {
+      this.rejectRatio = Math.min(1, this.spoofCount / this.totalTracked);
+      // Pencereyi kaydır: her optimizasyonda sayıları yarıla (exponential decay)
+      this.spoofCount *= 0.9;
+      this.totalTracked *= 0.9;
+    }
     if (this.rejectRatio > 0.6) this.largeOrderThreshold = Math.min(50, this.largeOrderThreshold * 1.1);
     else if (this.rejectRatio < 0.3) this.largeOrderThreshold = Math.max(5, this.largeOrderThreshold * 0.95);
   }
