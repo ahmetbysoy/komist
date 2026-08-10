@@ -199,6 +199,24 @@ export class UltimateTradingCommandCenter {
     // Panteon modları yüklendikten sonra threshold/cooldown etkileri güncel kalsın
     STATE.strategyStats = this.strategyStats;
 
+    // Patch #1: activeStrategies yoksa tüm stratejileri aktif yap (barva35 loadSettings mantığı)
+    if (!this.settings.activeStrategies || Object.keys(this.settings.activeStrategies).length === 0) {
+      this.settings.activeStrategies = {};
+      for (const key of this.strategyKeys) this.settings.activeStrategies[key] = true;
+    } else {
+      // Eksik anahtarları tamamla (yeni strateji eklenmişse)
+      for (const key of this.strategyKeys) {
+        if (this.settings.activeStrategies[key] === undefined) this.settings.activeStrategies[key] = true;
+      }
+    }
+    // statusMaps yoksa oluştur
+    if (!this.settings.statusMaps) this.settings.statusMaps = { shadowBanned: {}, hardBanned: {} };
+    if (!this.settings.statusMaps.shadowBanned) this.settings.statusMaps.shadowBanned = {};
+    if (!this.settings.statusMaps.hardBanned) this.settings.statusMaps.hardBanned = {};
+    // strategyParams yoksa oluştur
+    if (!this.settings.strategyParams) this.settings.strategyParams = {};
+    this.saveSettings();
+
     this.applyStrategyParamOverrides();
 
     document.body.classList.add('header-collapsed');

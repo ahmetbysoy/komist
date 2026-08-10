@@ -62,6 +62,8 @@ export const DEFAULT_SETTINGS = {
     hardBanned: {}
   },
 
+  activeStrategies: {},
+
   strategyParams: {
     wallBounce: { DISTANCE_THRESHOLD_PERCENT: 0.0005 },
     velocityScalping: { VELOCITY_WINDOW_MS: 2000, MIN_POINTS: 20, VELOCITY_THRESHOLD_PERCENT: 0.001 },
