@@ -263,7 +263,17 @@ body.fullscreen-chart #chart-countdown-overlay { display: block !important; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 10px; }
 .data-table th, .data-table td { padding: 5px 6px; border-bottom: 1px solid var(--border-color); text-align: left; white-space: nowrap; }
 .data-table th { color: var(--text-secondary); font-weight: 400; }
+.data-table tr:hover { background: var(--hover-bg); }
 .data-table-container { overflow-x: auto; }
+
+/* ═══ ŞEREF TABLOSU MODAL (Patch #7 polish) ═══ */
+#honor-modal-overlay {
+  position: fixed; inset: 0; z-index: 2600;
+  background: rgba(0,0,0,0.7);
+  display: none; align-items: center; justify-content: center;
+  padding: 10px;
+}
+#honor-modal-overlay[style*="flex"] { display: flex !important; }
 
 /* ═══ EFEKT KATMANLARI ═══ */
 #cosmic-effects-layer { position: fixed; inset: 0; pointer-events: none; z-index: 3000; }
