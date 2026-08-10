@@ -409,7 +409,7 @@ export class UIController {
     if (!tbody) return;
     const mem = this.bot.tradingSystemMemory;
     if (!mem || !mem.paternExperiences || mem.paternExperiences.size === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Henüz deneyim yok — sinyal üretildikçe dolacak</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Henüz deneyim yok — sinyal üretildikçe dolacak</td></tr>';
       return;
     }
     const rows = Array.from(mem.paternExperiences.entries())
@@ -418,13 +418,18 @@ export class UIController {
     tbody.innerHTML = rows.map(exp => {
       const wrColor = exp.successRate >= 60 ? 'var(--positive)' : exp.successRate >= 45 ? 'var(--neutral)' : 'var(--negative)';
       const lastSeen = exp.lastSeen ? new Date(exp.lastSeen).toLocaleTimeString('tr-TR') : '-';
+      const avgProfit = exp.averageProfitPercent !== undefined ? exp.averageProfitPercent.toFixed(2) + '%' : '-';
+      const avgHold = exp.averageHoldDuration ? (exp.averageHoldDuration/60).toFixed(1) + 'dk' : '-';
+      const maxDD = exp.maxDrawdown !== undefined ? exp.maxDrawdown.toFixed(2) + '%' : '-';
+      const ddColor = exp.maxDrawdown < -1 ? 'var(--negative)' : 'var(--text-secondary)';
       return `<tr>
-        <td style="font-size:9px; max-width:180px; overflow:hidden; text-overflow:ellipsis;" title="${exp.patern}">${exp.patern.slice(0,30)}</td>
+        <td style="font-size:9px; max-width:140px; overflow:hidden; text-overflow:ellipsis;" title="${exp.patern}">${exp.patern.slice(0,24)}</td>
         <td>${exp.totalPredictions}</td>
         <td style="color:var(--positive)">${exp.successCount}</td>
-        <td style="color:var(--negative)">${exp.failureCount}</td>
-        <td>${exp.neutralCount}</td>
         <td style="color:${wrColor}; font-weight:700;">${exp.successRate.toFixed(1)}%</td>
+        <td style="font-size:10px;">${avgProfit}</td>
+        <td style="font-size:10px;">${avgHold}</td>
+        <td style="color:${ddColor}; font-size:10px;">${maxDD}</td>
         <td style="font-size:9px;">${lastSeen}</td>
       </tr>`;
     }).join('');

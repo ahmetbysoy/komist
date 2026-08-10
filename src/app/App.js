@@ -154,6 +154,7 @@ export class UltimateTradingCommandCenter {
     this.performanceInterval = null;
     this.sessionInterval = null;
     this.evaluationInterval = null;
+    this.dynamicThresholdInterval = null;
     this.apiQueue = new ApiQueue(200);
     this.isRunning = false;
     this.reconnectAttempts = 0;
@@ -288,6 +289,8 @@ export class UltimateTradingCommandCenter {
     this.evaluationInterval = setInterval(() => this.evaluatePendingSignals(), 60 * 1000);
     if (this.settings.optimization.enabled) {
       this.paramTuneInterval = setInterval(() => this.autoTuneStrategyParams(), 5 * 60 * 1000);
+      // BÖLÜM 2: Dinamik eşikler de 5dk'da bir güncellensin
+      this.dynamicThresholdInterval = setInterval(() => this.updateDynamicThresholds(), 5 * 60 * 1000);
     }
     document.getElementById('start-btn').disabled = true;
     document.getElementById('stop-btn').disabled = false;
@@ -301,6 +304,7 @@ export class UltimateTradingCommandCenter {
     clearInterval(this.analysisInterval);
     if (this.evaluationInterval) clearInterval(this.evaluationInterval);
     if (this.paramTuneInterval) clearInterval(this.paramTuneInterval);
+    if (this.dynamicThresholdInterval) clearInterval(this.dynamicThresholdInterval);
     this.ui.updateConnection(false, 'DURDURULDU');
     Logger.info('App', 'Sistem durduruldu');
     this.notify.warning('Sistem durduruldu.');
@@ -511,13 +515,23 @@ export class UltimateTradingCommandCenter {
           // paternExperiences Map güncelle
           let exp = this.tradingSystemMemory.paternExperiences.get(paternKey);
           if (!exp) {
-            exp = { totalPredictions: 0, successCount: 0, failureCount: 0, neutralCount: 0, successRate: 0, firstSeen: Date.now(), lastSeen: Date.now() };
+            exp = { totalPredictions: 0, successCount: 0, failureCount: 0, neutralCount: 0, successRate: 0, averageProfitPercent: 0, averageHoldDuration: 0, maxDrawdown: 0, firstSeen: Date.now(), lastSeen: Date.now() };
           }
+          const before = exp.totalPredictions;
           exp.totalPredictions += 1;
+          const after = exp.totalPredictions;
           if (result === 'success') exp.successCount += 1;
           else if (result === 'failure') exp.failureCount += 1;
           else exp.neutralCount += 1;
           exp.successRate = exp.totalPredictions > 0 ? (exp.successCount / exp.totalPredictions) * 100 : 0;
+          // Ortalama kar yüzdesi
+          exp.averageProfitPercent = ((exp.averageProfitPercent * before) + changePct) / after;
+          // Ortalama tutma süresi (saniye) — t60 için her zaman 3600, ama genel tutma süresi için hesapla
+          const holdDuration = (Date.now() - sig.timestamp) / 1000;
+          exp.averageHoldDuration = ((exp.averageHoldDuration * before) + holdDuration) / after;
+          // Max drawdown — en kötü kar yüzdesi (en düşük)
+          if (before === 0) exp.maxDrawdown = changePct;
+          else exp.maxDrawdown = Math.min(exp.maxDrawdown, changePct);
           exp.lastSeen = Date.now();
           if (!exp.firstSeen) exp.firstSeen = sig.timestamp;
           this.tradingSystemMemory.paternExperiences.set(paternKey, exp);
@@ -1184,6 +1198,54 @@ export class UltimateTradingCommandCenter {
         }
       }
     }, 60000);
+  }
+
+  updateDynamicThresholds() {
+    // BÖLÜM 2: Dinamik ve öğrenen sinyal eşikleri (reputation + patern başarı oranına göre)
+    const rep = this.tradingSystemMemory?.reputation?.score || 100;
+    const baseProfit = 0.2;
+    const baseVolumeSpike = 5;
+    // Reputation yüksekse daha sıkı (daha az sinyal, daha güvenli), düşükse daha gevşek
+    let profitTarget = baseProfit;
+    let volumeSpike = baseVolumeSpike;
+    if (rep >= 130) { profitTarget = 0.25; volumeSpike = 6; }
+    else if (rep >= 110) { profitTarget = 0.22; volumeSpike = 5.5; }
+    else if (rep <= 80) { profitTarget = 0.15; volumeSpike = 4; }
+    else if (rep <= 90) { profitTarget = 0.18; volumeSpike = 4.5; }
+
+    // Patern bazlı: eğer son 10 sinyalde en sık görülen paternin WR yüksekse, eşikleri sıkılaştır
+    try {
+      const exps = Array.from(this.tradingSystemMemory.paternExperiences.values());
+      if (exps.length) {
+        const best = exps.reduce((a,b) => a.successRate > b.successRate ? a : b);
+        if (best.successRate >= 70 && best.totalPredictions >= 10) {
+          profitTarget *= 1.1;
+          volumeSpike *= 1.1;
+        } else if (best.successRate < 45 && best.totalPredictions >= 10) {
+          profitTarget *= 0.9;
+          volumeSpike *= 0.9;
+        }
+      }
+    } catch(_){}
+
+    this.settings.signalThresholds.profitTargetPercent = parseFloat(profitTarget.toFixed(3));
+    this.settings.signalThresholds.volumeSpikeThreshold = parseFloat(volumeSpike.toFixed(1));
+    // strongBuyRatio da dinamik olsun
+    const baseRatio = 0.55;
+    this.settings.signalThresholds.strongBuyRatio = rep >= 120 ? 0.60 : rep <= 80 ? 0.50 : baseRatio;
+  }
+
+  // Gelişmiş hacim patlaması analizi (P4_BUY/SELL için)
+  isVolumeSpike(currentVolume) {
+    if (!currentVolume || !this.candles || this.candles.length < 30) return false;
+    const vols = this.candles.map(c => c.volume);
+    const avg = (arr) => arr.reduce((a,b)=>a+b,0)/arr.length;
+    const avg5 = avg(vols.slice(-5));
+    const avg15 = avg(vols.slice(-15));
+    const avg30 = avg(vols.slice(-30));
+    const threshold = this.settings.signalThresholds.volumeSpikeThreshold || 5;
+    // Son 1dk hacmi, 5/15/30dk ortalamasının threshold katı mı?
+    return currentVolume > avg5 * threshold * 0.5 || currentVolume > avg15 * threshold * 0.3 || currentVolume > avg30 * threshold * 0.2;
   }
 
   autoTuneStrategyParams() {

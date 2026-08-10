@@ -38,7 +38,9 @@ export const DEFAULT_SETTINGS = {
   // ── Sinyal eşikleri (yapay zeka hafızası için) ─────────
   signalThresholds: {
     volumeSpikeThreshold: 5,
-    profitTargetPercent: 0.2
+    profitTargetPercent: 0.2,
+    strongBuyRatio: 0.55,
+    wallVolumeMultiplier: 1.5
   },
 
   // ── Oto-optimizasyon ─────────────────────────────────
